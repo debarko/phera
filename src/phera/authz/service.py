@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
-from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from phera.authz.actor import Actor
@@ -28,7 +25,9 @@ async def ensure_user_stub(session: AsyncSession, actor: Actor, workspace_id: uu
     )
 
 
-async def get_ownership_profile(session: AsyncSession, workspace_id: uuid.UUID) -> OwnershipProfile | None:
+async def get_ownership_profile(
+    session: AsyncSession, workspace_id: uuid.UUID
+) -> OwnershipProfile | None:
     return await session.get(OwnershipProfile, workspace_id)
 
 

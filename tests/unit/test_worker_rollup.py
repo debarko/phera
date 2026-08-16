@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, UTC
+from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -49,7 +49,11 @@ async def test_run_daily_rollup_creates_when_missing(monkeypatch):
     workspace_id = uuid.uuid4()
     day = date(2026, 8, 16)
     session.get = AsyncMock(return_value=None)
-    session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+    session.execute = AsyncMock(
+        return_value=MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        )
+    )
 
     await run_daily_rollup(session, workspace_id, day)
 

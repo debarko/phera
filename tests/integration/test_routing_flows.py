@@ -6,7 +6,14 @@ import pytest
 from sqlalchemy import func, select
 
 from phera.authz.service import ensure_user_stub
-from phera.db.models import AgentPresence, RoutingPolicy, RoutingTier, Team, Ticket, TicketOffer, User
+from phera.db.models import (
+    AgentPresence,
+    RoutingPolicy,
+    RoutingTier,
+    Team,
+    Ticket,
+    TicketOffer,
+)
 from phera.modules.routing.engine import agent_open_load, route_unassigned_ticket
 from tests.support.factories import contact as make_contact
 from tests.support.factories import staff_actor

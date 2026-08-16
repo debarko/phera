@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from phera.settings import Settings, get_settings
 
 

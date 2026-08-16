@@ -22,7 +22,9 @@ async def test_ensure_renames_legacy_l1_l2_teams(db_session, workspace_bundle):
 
     teams = {
         row.slug: row.name
-        for row in (await db_session.execute(select(Team).where(Team.workspace_id == ws.id))).scalars()
+        for row in (
+            await db_session.execute(select(Team).where(Team.workspace_id == ws.id))
+        ).scalars()
     }
     assert teams["support_agent"] == "Support agents"
     assert teams["support_admin"] == "Support admins"
@@ -32,7 +34,9 @@ async def test_ensure_renames_legacy_l1_l2_teams(db_session, workspace_bundle):
     tiers = list(
         (
             await db_session.execute(
-                select(RoutingTier).where(RoutingTier.policy_id == policy.id).order_by(RoutingTier.position)
+                select(RoutingTier)
+                .where(RoutingTier.policy_id == policy.id)
+                .order_by(RoutingTier.position)
             )
         ).scalars()
     )

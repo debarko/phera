@@ -103,7 +103,11 @@ def parse_inbound(payload: dict) -> dict | None:
 
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     message = data.get("message") if isinstance(data.get("message"), dict) else data
-    contact = _first(data.get("contact"), payload.get("contact"), message.get("contact") if isinstance(message, dict) else None)
+    contact = _first(
+        data.get("contact"),
+        payload.get("contact"),
+        message.get("contact") if isinstance(message, dict) else None,
+    )
     contact = contact if isinstance(contact, dict) else {}
     whatsapp = message.get("whatsapp") if isinstance(message, dict) else None
     whatsapp = whatsapp if isinstance(whatsapp, dict) else {}
@@ -135,7 +139,9 @@ def parse_inbound(payload: dict) -> dict | None:
     if not phone or not body:
         return None
 
-    name = _first(contact.get("name"), contact.get("fullName"), data.get("name"), payload.get("name"))
+    name = _first(
+        contact.get("name"), contact.get("fullName"), data.get("name"), payload.get("name")
+    )
     provider_id = str(
         _first(
             data.get("id"),
@@ -213,7 +219,9 @@ class GallaboxMessagingProvider(MessagingProvider):
 
     async def send(self, to: str, body: str, template: str | None = None, **kwargs: Any) -> str:
         if not self.configured():
-            raise RuntimeError("Gallabox is not configured — set GALLABOX_API_KEY/SECRET/ACCOUNT_ID/CHANNEL_ID")
+            raise RuntimeError(
+                "Gallabox is not configured — set GALLABOX_API_KEY/SECRET/ACCOUNT_ID/CHANNEL_ID"
+            )
 
         phone = normalize_phone(to) or to
         name = kwargs.get("name") or phone
@@ -243,7 +251,9 @@ class GallaboxMessagingProvider(MessagingProvider):
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(self.endpoint, json=payload, headers=headers)
         if response.status_code not in (200, 201, 202):
-            logger.error("Gallabox send failed status=%s body=%s", response.status_code, response.text)
+            logger.error(
+                "Gallabox send failed status=%s body=%s", response.status_code, response.text
+            )
             raise RuntimeError(f"Gallabox send failed ({response.status_code}): {response.text}")
         data = response.json() if response.content else {}
         return str(data.get("id") or data.get("messageId") or f"gallabox-{phone}")

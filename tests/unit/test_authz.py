@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
 from phera.authz.actor import Actor, actor_from_headers, parse_permissions_header, system_actor
 from phera.authz.visibility import can_see_deal
@@ -112,7 +111,9 @@ class TestCanSeeDeal:
             stage_id=uuid.uuid4(),
             owner_user_id="other",
         )
-        profile = OwnershipProfile(workspace_id=deal.workspace_id, mode="pipeline_centric", flags={})
+        profile = OwnershipProfile(
+            workspace_id=deal.workspace_id, mode="pipeline_centric", flags={}
+        )
         actor = Actor(id="me", permissions={"crm.pipelines.read": "allow"})
         assert await can_see_deal(None, actor, deal, profile) is True
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import uuid
-
 import pytest
 from sqlalchemy import func, select
 
@@ -14,7 +12,6 @@ from tests.support import factories
 
 @pytest.mark.asyncio
 async def test_mutate_persists_audit_and_outbox(db_session, workspace_bundle):
-    contact = workspace_bundle.form_a  # just need workspace id
     ws_id = workspace_bundle.workspace.id
 
     from tests.support.factories import contact as make_contact
@@ -54,7 +51,9 @@ async def test_two_different_forms_create_two_deals(db_session, workspace_bundle
     skin_stage = factories.stage(skin_pipeline.id, name="New", position=0)
     db_session.add(skin_stage)
     await db_session.flush()
-    form_b = factories.form(ws.id, skin_pipeline.id, skin_stage.id, slug="skin-intake-b", name="Skin B")
+    form_b = factories.form(
+        ws.id, skin_pipeline.id, skin_stage.id, slug="skin-intake-b", name="Skin B"
+    )
     db_session.add(form_b)
     await db_session.commit()
 

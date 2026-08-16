@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -45,9 +45,9 @@ async def test_worker_notify_skips_without_redis():
     get_settings.cache_clear()
     with patch.dict("os.environ", {"REDIS_URL": ""}, clear=False):
         get_settings.cache_clear()
-        from phera.worker.notify import notify_outbox
-
         import uuid
+
+        from phera.worker.notify import notify_outbox
 
         # Should return immediately without connecting
         await notify_outbox(uuid.uuid4())

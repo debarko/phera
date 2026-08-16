@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 import uuid
@@ -18,7 +17,6 @@ from phera.db.models import (
     MetricDaily,
     OutboxEvent,
     RollupRun,
-    Ticket,
     WorkflowRun,
 )
 from phera.db.session import SessionLocal
@@ -76,7 +74,10 @@ async def process_outbox_event(session: AsyncSession, outbox_id: uuid.UUID) -> N
 
                 await transcribe_call(session, uuid.UUID(call_id))
 
-        if event.event_type == "broadcast.requested" and "communication" in get_settings().worker_queue_list:
+        if (
+            event.event_type == "broadcast.requested"
+            and "communication" in get_settings().worker_queue_list
+        ):
             logger.info("Broadcast queued segment=%s", event.payload.get("segment_filter"))
 
         event.status = "processed"
@@ -166,11 +167,15 @@ async def run_daily_rollup(session: AsyncSession, workspace_id: uuid.UUID, day: 
         )
     )
 
-    dq = await session.execute(select(Deal).where(Deal.workspace_id == workspace_id, Deal.status == "open"))
+    dq = await session.execute(
+        select(Deal).where(Deal.workspace_id == workspace_id, Deal.status == "open")
+    )
     open_deals = dq.scalars().all()
     for deal in open_deals:
         age = int((datetime.now(UTC) - (deal.created_at or datetime.now(UTC))).total_seconds())
-        stage_age = int((datetime.now(UTC) - (deal.stage_entered_at or datetime.now(UTC))).total_seconds())
+        stage_age = int(
+            (datetime.now(UTC) - (deal.stage_entered_at or datetime.now(UTC))).total_seconds()
+        )
         session.add(
             AgingSnapshotDaily(
                 date=day,
@@ -182,7 +187,11 @@ async def run_daily_rollup(session: AsyncSession, workspace_id: uuid.UUID, day: 
                 owner_user_id=deal.owner_user_id,
                 age_seconds=age,
                 stage_age_seconds=stage_age,
-                milestones={"stage_entered_at": deal.stage_entered_at.isoformat() if deal.stage_entered_at else None},
+                milestones={
+                    "stage_entered_at": (
+                        deal.stage_entered_at.isoformat() if deal.stage_entered_at else None
+                    )
+                },
             )
         )
 
@@ -207,7 +216,10 @@ async def run_worker_loop() -> None:
                     if ws:
                         await run_daily_rollup(session, ws.id, date.today())
 
-                if "workflow" in settings.worker_queue_list or "lifecycle" in settings.worker_queue_list:
+                if (
+                    "workflow" in settings.worker_queue_list
+                    or "lifecycle" in settings.worker_queue_list
+                ):
                     await dispatch_outbox_batch(session)
 
                 if "delayed" in settings.worker_queue_list:

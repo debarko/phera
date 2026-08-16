@@ -4,10 +4,9 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import select
 
-from phera.db.models import OutboxEvent, Workflow, WorkflowRun
-from phera.modules.workflows.engine import continue_run, match_workflows, start_workflow_run
+from phera.db.models import OutboxEvent, Workflow
+from phera.modules.workflows.engine import match_workflows, start_workflow_run
 from phera.worker.runner import process_outbox_event
 
 

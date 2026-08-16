@@ -9,8 +9,8 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from phera.authz.actor import Actor
-from phera.db.models import AuditEvent, Interaction, OutboxEvent, Ticket
 from phera.db.commit import track_outbox_notify
+from phera.db.models import AuditEvent, Interaction, OutboxEvent, Ticket
 from phera.modules.tickets.activity import touch_ticket_activity
 from phera.observability.otel import get_tracer, record_mutate
 

@@ -37,7 +37,9 @@ async def inbound_webhook(
         if not verify_gallabox(raw, signature, settings.gallabox_webhook_secret):
             raise HTTPException(401, "Invalid Gallabox signature")
     elif connector_id in ("google_group", "email"):
-        signature = request.headers.get("x-email-signature") or request.headers.get("x-webhook-secret")
+        signature = request.headers.get("x-email-signature") or request.headers.get(
+            "x-webhook-secret"
+        )
         if not verify_email(raw, signature, settings.email_webhook_secret):
             raise HTTPException(401, "Invalid email webhook signature")
 
@@ -72,7 +74,9 @@ async def inbound_webhook(
             raise HTTPException(422, str(exc)) from exc
         return {"received": True, **result}
 
-    logger.info("Unhandled hook connector=%s channel=%s keys=%s", connector_id, channel, list(body.keys()))
+    logger.info(
+        "Unhandled hook connector=%s channel=%s keys=%s", connector_id, channel, list(body.keys())
+    )
     return {
         "received": True,
         "connector_id": connector_id,

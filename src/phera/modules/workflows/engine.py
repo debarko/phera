@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,14 +57,18 @@ async def start_workflow_run(
         context={"trigger_event": event.payload, "event_type": event.event_type},
         idempotency_key=idem,
         deal_id=uuid.UUID(event.payload["deal_id"]) if event.payload.get("deal_id") else None,
-        contact_id=uuid.UUID(event.payload["contact_id"]) if event.payload.get("contact_id") else None,
+        contact_id=(
+            uuid.UUID(event.payload["contact_id"]) if event.payload.get("contact_id") else None
+        ),
     )
     session.add(run)
     await session.flush()
     return run
 
 
-async def execute_node(session: AsyncSession, run: WorkflowRun, workflow: Workflow, node_id: str) -> str | None:
+async def execute_node(
+    session: AsyncSession, run: WorkflowRun, workflow: Workflow, node_id: str
+) -> str | None:
     graph = workflow.graph or {}
     nodes = {n["id"]: n for n in graph.get("nodes", [])}
     edges = graph.get("edges", [])
@@ -111,7 +114,11 @@ async def execute_node(session: AsyncSession, run: WorkflowRun, workflow: Workfl
                 if deal:
                     field = config.get("field")
                     value = config.get("value")
-                    old = getattr(deal, field.split(".")[-1], None) if "." not in field else deal.custom_fields.get(field.split(".")[-1])
+                    old = (
+                        getattr(deal, field.split(".")[-1], None)
+                        if "." not in field
+                        else deal.custom_fields.get(field.split(".")[-1])
+                    )
                     if field.startswith("custom_fields."):
                         key = field.split(".", 1)[1]
                         deal.custom_fields = {**deal.custom_fields, key: value}

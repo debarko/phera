@@ -17,7 +17,11 @@ from phera.db.commit import commit_and_notify
 from phera.db.models import AgentPresence, ChannelAccount, Ticket, TicketOffer, Workspace
 from phera.modules.tickets.activity import touch_ticket_activity
 from phera.modules.tickets.enrichment import ticket_detail_dict
-from phera.modules.tickets.inbox_events import publish_inbox_event, subscribe_inbox, unsubscribe_inbox
+from phera.modules.tickets.inbox_events import (
+    publish_inbox_event,
+    subscribe_inbox,
+    unsubscribe_inbox,
+)
 
 router = APIRouter(tags=["inbox"])
 

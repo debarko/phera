@@ -55,7 +55,9 @@ async def ensure_support_routing(session: AsyncSession, workspace_id: uuid.UUID)
         return
 
     tier_q = await session.execute(
-        select(RoutingTier).where(RoutingTier.policy_id == policy.id).order_by(RoutingTier.position.asc())
+        select(RoutingTier)
+        .where(RoutingTier.policy_id == policy.id)
+        .order_by(RoutingTier.position.asc())
     )
     existing = list(tier_q.scalars().all())
     wanted = [

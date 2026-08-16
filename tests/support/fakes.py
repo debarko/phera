@@ -1,11 +1,8 @@
 """In-memory fakes for unit tests — never touch a real database."""
 from __future__ import annotations
 
-import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class RecordingSession:

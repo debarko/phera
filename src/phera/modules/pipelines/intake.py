@@ -12,11 +12,10 @@ from phera.db.models import (
     Deal,
     Form,
     FormSubmission,
-    Interaction,
     Pipeline,
     Stage,
 )
-from phera.db.mutate import FieldChange, MutateRequest, compute_diff, mutate
+from phera.db.mutate import FieldChange, MutateRequest, mutate
 
 
 async def upsert_contact(
@@ -68,7 +67,6 @@ async def upsert_contact(
         session.add(contact)
         await session.flush()
     elif not is_new:
-        before = {"name": contact.name, "primary_email": contact.primary_email}
         if payload.get("name"):
             contact.name = payload.get("name")
         session.add(contact)
@@ -139,7 +137,12 @@ async def process_form_submission(
 
     policy = form.resubmission_policy or pipeline.resubmission_policy or "reuse_open_deal"
     contact, contact_created = await upsert_contact(
-        session, form.workspace_id, payload, form.matching_keys or ["email", "phone"], form, is_new=True
+        session,
+        form.workspace_id,
+        payload,
+        form.matching_keys or ["email", "phone"],
+        form,
+        is_new=True,
     )
 
     deal, deal_action = await resolve_deal(session, contact, pipeline, entry_stage, policy)

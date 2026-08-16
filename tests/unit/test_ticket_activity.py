@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
-
-import pytest
+from datetime import UTC, datetime
 
 from phera.db.models import Ticket
 from phera.modules.tickets.activity import touch_ticket_activity

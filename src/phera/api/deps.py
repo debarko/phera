@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request
@@ -22,7 +21,6 @@ async def get_actor(
     headers = {k.lower(): v for k, v in request.headers.items()}
     actor = actor_from_headers(headers)
     if actor.id:
-        span = request.state.__dict__.get("_otel_span")
         return actor
     if request.url.path.startswith("/public/") or request.url.path.startswith("/hooks/"):
         return Actor(actor_type="connector")
@@ -35,7 +33,9 @@ async def get_workspace(
     q = await session.execute(select(Workspace).where(Workspace.slug == DEFAULT_WORKSPACE_SLUG))
     ws = q.scalar_one_or_none()
     if not ws:
-        raise HTTPException(status_code=503, detail="Workspace not initialized — run migrations/seed")
+        raise HTTPException(
+            status_code=503, detail="Workspace not initialized — run migrations/seed"
+        )
     return ws
 
 
