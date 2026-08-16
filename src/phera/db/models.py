@@ -107,7 +107,7 @@ class Pipeline(Base, TimestampMixin):
     resubmission_policy: Mapped[str] = mapped_column(String(32), default="reuse_open_deal")
 
     __table_args__ = (UniqueConstraint("workspace_id", "slug"),)
-    stages: Mapped[list["Stage"]] = relationship(back_populates="pipeline", order_by="Stage.position")
+    stages: Mapped[list[Stage]] = relationship(back_populates="pipeline", order_by="Stage.position")
 
 
 class Stage(Base, TimestampMixin):
@@ -122,7 +122,7 @@ class Stage(Base, TimestampMixin):
     probability: Mapped[int | None] = mapped_column(Integer)
     required_fields: Mapped[dict] = mapped_column(JSONB, default=dict)
 
-    pipeline: Mapped["Pipeline"] = relationship(back_populates="stages")
+    pipeline: Mapped[Pipeline] = relationship(back_populates="stages")
 
 
 class PipelineTeam(Base):
@@ -180,7 +180,9 @@ class Form(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    target_pipeline_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pipelines.id"), nullable=False)
+    target_pipeline_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("pipelines.id"), nullable=False
+    )
     entry_stage_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("stages.id"), nullable=False)
     field_schema: Mapped[list] = mapped_column(JSONB, default=list)
     matching_keys: Mapped[list] = mapped_column(JSONB, default=lambda: ["email", "phone"])
@@ -200,7 +202,9 @@ class FormSubmission(Base):
     contact_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("contacts.id"), nullable=False)
     deal_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("deals.id"))
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class Interaction(Base):
@@ -214,7 +218,9 @@ class Interaction(Base):
     type: Mapped[str] = mapped_column(String(64), nullable=False)
     direction: Mapped[str | None] = mapped_column(String(16))
     body: Mapped[str | None] = mapped_column(Text)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     actor_type: Mapped[str | None] = mapped_column(String(32))
     actor_id: Mapped[str | None] = mapped_column(String(64))
 
@@ -248,7 +254,9 @@ class OutboxEvent(Base):
     __tablename__ = "outbox_events"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
     event_type: Mapped[str] = mapped_column(String(128), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -324,7 +332,9 @@ class Message(Base):
     thread_keys: Mapped[dict] = mapped_column(JSONB, default=dict)
     body: Mapped[str | None] = mapped_column(Text)
     raw: Mapped[dict] = mapped_column(JSONB, default=dict)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class RoutingPolicy(Base, TimestampMixin):
@@ -453,7 +463,9 @@ class WorkflowNodeRun(Base):
     __tablename__ = "workflow_node_runs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    workflow_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workflow_runs.id"), nullable=False)
+    workflow_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workflow_runs.id"), nullable=False
+    )
     node_id: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="pending")
     provider_message_id: Mapped[str | None] = mapped_column(String(255))

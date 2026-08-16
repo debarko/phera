@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from phera.db.models import AgentPresence, RoutingPolicy, RoutingTier, Ticket, TicketOffer, User
+from phera.db.models import AgentPresence, RoutingPolicy, RoutingTier, Ticket, TicketOffer
 
 
 async def route_unassigned_ticket(

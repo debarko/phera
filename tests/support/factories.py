@@ -25,7 +25,9 @@ def ownership_profile(workspace_id: uuid.UUID) -> OwnershipProfile:
     return OwnershipProfile(workspace_id=workspace_id, mode="pipeline_centric", flags={})
 
 
-def pipeline(workspace_id: uuid.UUID, *, slug: str = "ivf_consult", name: str = "IVF Consult") -> Pipeline:
+def pipeline(
+    workspace_id: uuid.UUID, *, slug: str = "ivf_consult", name: str = "IVF Consult"
+) -> Pipeline:
     return Pipeline(
         id=uuid.uuid4(),
         workspace_id=workspace_id,

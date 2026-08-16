@@ -4,7 +4,11 @@ import asyncio
 
 import pytest
 
-from phera.modules.tickets.inbox_events import publish_inbox_event, subscribe_inbox, unsubscribe_inbox
+from phera.modules.tickets.inbox_events import (
+    publish_inbox_event,
+    subscribe_inbox,
+    unsubscribe_inbox,
+)
 
 
 @pytest.mark.asyncio

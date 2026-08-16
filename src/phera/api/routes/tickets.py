@@ -20,7 +20,16 @@ from phera.api.schemas import (
 )
 from phera.authz.actor import Actor
 from phera.db.commit import commit_and_notify
-from phera.db.models import Call, ChannelAccount, Contact, Interaction, Message, Ticket, Transcript, Workspace
+from phera.db.models import (
+    Call,
+    ChannelAccount,
+    Contact,
+    Interaction,
+    Message,
+    Ticket,
+    Transcript,
+    Workspace,
+)
 from phera.db.mutate import FieldChange, MutateRequest, mutate
 from phera.modules.connectors.gallabox import GallaboxMessagingProvider
 from phera.modules.connectors.google_group import GoogleGroupEmailProvider

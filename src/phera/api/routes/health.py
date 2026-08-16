@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from phera.db.models import OutboxEvent
-from phera.db.session import get_db, get_engine
+from phera.db.session import get_db
 from phera.settings import get_settings
 
 router = APIRouter(tags=["health"])

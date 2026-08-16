@@ -12,9 +12,9 @@ from phera.api.schemas import (
     ContactCreate,
     ContactOut,
     ContactUpdate,
+    DealAssign,
     DealCreate,
     DealOut,
-    DealAssign,
     DealUpdateStage,
     OrganizationCreate,
     OrganizationOut,
@@ -157,7 +157,9 @@ async def list_pipelines(
     pipelines = q.scalars().all()
     result = []
     for p in pipelines:
-        sq = await session.execute(select(Stage).where(Stage.pipeline_id == p.id).order_by(Stage.position))
+        sq = await session.execute(
+            select(Stage).where(Stage.pipeline_id == p.id).order_by(Stage.position)
+        )
         stages = sq.scalars().all()
         result.append(
             PipelineOut(
@@ -278,7 +280,7 @@ async def move_deal_stage(
             },
             timeline=True,
             timeline_type="status-change",
-            timeline_body=f"Stage changed",
+            timeline_body="Stage changed",
             contact_id=deal.contact_id,
             deal_id=deal.id,
         ),

@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.support.fakes import RecordingSession
 from phera.db.commit import commit_and_notify, track_outbox_notify
+from tests.support.fakes import RecordingSession
 
 
 @pytest.mark.asyncio

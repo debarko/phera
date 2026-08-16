@@ -82,7 +82,11 @@ async def test_gallabox_webhook_creates_ticket(client, db_session, workspace_bun
 
     conv = await client.get(
         f"/v1/tickets/{body['ticket_id']}/conversation",
-        headers={"X-Actor-Id": "agent-1", "X-Actor-Email": "agent@test.com", "X-Actor-Unrestricted": "true"},
+        headers={
+            "X-Actor-Id": "agent-1",
+            "X-Actor-Email": "agent@test.com",
+            "X-Actor-Unrestricted": "true",
+        },
     )
     assert conv.status_code == 200
     items = conv.json()
@@ -121,5 +125,7 @@ async def test_google_group_webhook_creates_ticket(client, db_session, workspace
 
 @pytest.mark.asyncio
 async def test_public_form_submit_unknown_returns_404(client):
-    resp = await client.post("/public/forms/does-not-exist/submit", json={"data": {"email": "a@b.com"}})
+    resp = await client.post(
+        "/public/forms/does-not-exist/submit", json={"data": {"email": "a@b.com"}}
+    )
     assert resp.status_code == 404

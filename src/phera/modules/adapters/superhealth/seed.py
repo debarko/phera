@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from phera.db.models import (
     ChannelAccount,
@@ -21,13 +20,16 @@ from phera.db.models import (
     Workspace,
 )
 
-
 SUPERHEALTH_PIPELINES = [
     ("ivf_consult", "IVF Consult", ["New", "Contacted", "Qualified", "Won", "Lost"]),
     ("skin_consult", "Skin Consult", ["New", "Contacted", "Qualified", "Won", "Lost"]),
     ("dental_consult", "Dental Consult", ["New", "Contacted", "Qualified", "Won", "Lost"]),
     ("camp_conversion", "Camp Conversion", ["New", "Follow-up", "Converted", "Lost"]),
-    ("partner_referral", "Partner Referral", ["New", "In Progress", "Qualified", "Converted", "Lost"]),
+    (
+        "partner_referral",
+        "Partner Referral",
+        ["New", "In Progress", "Qualified", "Converted", "Lost"],
+    ),
 ]
 
 
@@ -64,7 +66,9 @@ async def seed_superhealth_workspace(session: AsyncSession, workspace: Workspace
         ("fertility_sales", "Fertility sales"),
         ("skin_sales", "Skin sales"),
     ):
-        session.add(Team(id=uuid.uuid4(), workspace_id=workspace.id, name=team_name, slug=team_slug))
+        session.add(
+            Team(id=uuid.uuid4(), workspace_id=workspace.id, name=team_name, slug=team_slug)
+        )
 
     policy = RoutingPolicy(
         id=uuid.uuid4(),

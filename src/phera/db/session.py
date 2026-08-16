@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-import os
 
 os.environ.setdefault("OTEL_ENABLED", "0")
 

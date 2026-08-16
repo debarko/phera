@@ -49,7 +49,9 @@ async def submit_form_authenticated(
     actor: Actor = Depends(get_authenticated_actor),
 ):
     q = await session.execute(
-        select(Form).where(Form.workspace_id == workspace.id, Form.slug == slug, Form.is_active.is_(True))
+        select(Form).where(
+            Form.workspace_id == workspace.id, Form.slug == slug, Form.is_active.is_(True)
+        )
     )
     form = q.scalar_one_or_none()
     if not form:

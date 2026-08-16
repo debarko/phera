@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from phera.authz.actor import Actor
 from phera.authz.service import ensure_user_stub, filter_deals_for_actor
-from phera.db.models import Deal, Ticket
+from phera.db.models import Ticket
 from phera.db.mutate import FieldChange, MutateRequest, mutate
 from phera.modules.adapters.superhealth.webhooks import handle_service_event_completed
 from tests.support.factories import contact as make_contact
@@ -39,8 +39,20 @@ async def test_filter_deals_for_actor_own_vs_global(db_session, workspace_bundle
     await ensure_user_stub(db_session, Actor(id="owner-b"), ws.id)
     await db_session.flush()
 
-    d1 = make_deal(ws.id, c.id, workspace_bundle.pipeline.id, workspace_bundle.stage_new.id, owner_user_id="owner-a")
-    d2 = make_deal(ws.id, c.id, workspace_bundle.pipeline.id, workspace_bundle.stage_qualified.id, owner_user_id="owner-b")
+    d1 = make_deal(
+        ws.id,
+        c.id,
+        workspace_bundle.pipeline.id,
+        workspace_bundle.stage_new.id,
+        owner_user_id="owner-a",
+    )
+    d2 = make_deal(
+        ws.id,
+        c.id,
+        workspace_bundle.pipeline.id,
+        workspace_bundle.stage_qualified.id,
+        owner_user_id="owner-b",
+    )
     db_session.add(d1)
     db_session.add(d2)
     await db_session.commit()
