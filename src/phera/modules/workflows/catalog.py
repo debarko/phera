@@ -1,0 +1,15 @@
+WORKFLOW_NODE_TYPES = [
+    {"kind": "trigger", "type": "event", "label": "Event trigger"},
+    {"kind": "trigger", "type": "schedule", "label": "Schedule (cron)"},
+    {"kind": "trigger", "type": "manual", "label": "Manual"},
+    {"kind": "trigger", "type": "webhook", "label": "Webhook"},
+    {"kind": "filter", "type": "condition", "label": "Condition"},
+    {"kind": "branch", "type": "if_else", "label": "If / else"},
+    {"kind": "wait", "type": "duration", "label": "Wait"},
+    {"kind": "action", "type": "update_field", "label": "Update field"},
+    {"kind": "action", "type": "assign_owner", "label": "Assign owner"},
+    {"kind": "action", "type": "send", "label": "Send message"},
+    {"kind": "action", "type": "emit_destination", "label": "Lifecycle destination"},
+    {"kind": "action", "type": "call_webhook", "label": "Call webhook"},
+    {"kind": "action", "type": "enroll_in_workflow", "label": "Enroll in workflow"},
+]
