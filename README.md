@@ -1,5 +1,7 @@
 # Phera
 
+[![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/debarko/phera?utm_source=oss&utm_medium=github&utm_campaign=debarko%2Fphera&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)](https://coderabbit.ai)
+
 **Phera** (ফেরা — the return) is a headless CRM: configurable funnels, omnichannel support, event-driven workflows, and lifecycle hooks.
 
 - Repo: https://github.com/debarko/phera
