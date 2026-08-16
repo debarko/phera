@@ -207,6 +207,9 @@ async def ticket_conversation(
                 body=msg.body,
                 occurred_at=msg.occurred_at,
                 channel_kind=msg_channel,
+                actor_type=(msg.raw or {}).get("actor_type"),
+                actor_id=(msg.raw or {}).get("actor_id"),
+                actor_name=(msg.raw or {}).get("actor_name"),
             )
         )
 
@@ -318,6 +321,11 @@ async def send_ticket_message(
         direction="outbound",
         body=body.body,
         occurred_at=now,
+        raw={
+            "actor_id": actor.id,
+            "actor_type": actor.actor_type,
+            "actor_name": actor.name or actor.email,
+        },
     )
     session.add(message)
     await session.flush()

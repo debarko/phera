@@ -187,6 +187,7 @@ class ConversationItemOut(ORMModel):
     occurred_at: datetime
     actor_type: str | None = None
     actor_id: str | None = None
+    actor_name: str | None = None
     channel_kind: str | None = None
     call_status: str | None = None
     transcript_status: str | None = None
