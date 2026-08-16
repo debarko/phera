@@ -56,6 +56,6 @@ Environment variables used in CI and locally:
 OTEL_ENABLED=0 REDIS_URL=
 ```
 
-## Superhealth wiring
+## Auth
 
-Staff traffic: `cm-dashboard` → `rx-gateway` `/api/crm` → Phera (private). Phera authorizes from `X-Actor-*` headers only — no JWT in the service.
+Phera is private to an upstream gateway. It authorizes from `X-Actor-*` headers only — no JWT in the service.
