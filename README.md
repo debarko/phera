@@ -8,6 +8,7 @@ client, or drive it from a script.
 [![Tests](https://github.com/debarko/phera/actions/workflows/ci.yml/badge.svg)](https://github.com/debarko/phera/actions/workflows/ci.yml)
 [![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/debarko/phera?utm_source=oss&utm_medium=github&utm_campaign=debarko%2Fphera&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)](https://coderabbit.ai)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License: BUSL 1.1](https://img.shields.io/badge/license-BUSL%201.1-blue)](LICENSE)
 
 **[Read the full walkthrough →](https://debarko.de/products/phera)**
 
@@ -197,3 +198,11 @@ WhatsApp (Gallabox) and email (Google Group → inbound hook) setup: see [CHANNE
 
 Issues and pull requests are welcome — read the code, open an issue, send
 a PR. `make test` before you push; CI runs the same suite on every PR.
+
+## License
+
+[Business Source License 1.1](LICENSE). Free to use, modify, self-host,
+and build commercial products on top of. The one thing it restricts:
+offering Phera itself — modified or not — to third parties as a hosted
+or managed service without a separate agreement. Converts automatically
+to Apache License 2.0 on 2030-08-16.
