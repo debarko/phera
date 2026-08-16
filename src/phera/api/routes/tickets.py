@@ -20,10 +20,13 @@ from phera.api.schemas import (
 )
 from phera.authz.actor import Actor
 from phera.db.commit import commit_and_notify
-from phera.db.models import Call, ChannelAccount, Interaction, Message, Ticket, Transcript, Workspace
+from phera.db.models import Call, ChannelAccount, Contact, Interaction, Message, Ticket, Transcript, Workspace
 from phera.db.mutate import FieldChange, MutateRequest, mutate
+from phera.modules.connectors.gallabox import GallaboxMessagingProvider
+from phera.modules.connectors.google_group import GoogleGroupEmailProvider
 from phera.modules.tickets.activity import touch_ticket_activity
 from phera.modules.tickets.enrichment import channel_for_ticket, ticket_detail_dict
+from phera.modules.tickets.inbox_events import publish_inbox_event
 
 router = APIRouter(tags=["tickets"])
 
@@ -84,6 +87,15 @@ async def create_ticket(
         ),
     )
     await commit_and_notify(session)
+    publish_inbox_event(
+        {
+            "type": "ticket.created",
+            "ticket_id": str(ticket.id),
+            "created_ticket": True,
+            "assignee_user_id": ticket.assignee_user_id,
+            "contact_id": str(ticket.contact_id),
+        }
+    )
     await session.refresh(ticket)
     return ticket
 
@@ -213,12 +225,17 @@ async def ticket_conversation(
             )
         )
 
+    # Message rows already appear above. Mutate also writes a timeline Interaction
+    # with type "message" — skip those so inbound/outbound chat is not duplicated.
+    skip_interaction_types = {"message", "received", "sent"}
     int_q = await session.execute(
         select(Interaction)
         .where(Interaction.ticket_id == ticket_id)
         .order_by(Interaction.occurred_at.asc())
     )
     for row in int_q.scalars().all():
+        if (row.type or "").lower() in skip_interaction_types:
+            continue
         items.append(
             ConversationItemOut(
                 id=row.id,
@@ -329,10 +346,47 @@ async def send_ticket_message(
     )
     session.add(message)
     await session.flush()
+
+    contact = await session.get(Contact, ticket.contact_id)
+    if channel.adapter_type == "gallabox":
+        provider = GallaboxMessagingProvider.from_settings()
+        if provider.configured():
+            if not contact or not contact.primary_phone:
+                raise HTTPException(400, "Contact has no phone number for WhatsApp")
+            try:
+                message.provider_message_id = await provider.send(
+                    contact.primary_phone,
+                    body.body,
+                    name=contact.name,
+                )
+            except RuntimeError as exc:
+                raise HTTPException(502, str(exc)) from exc
+    elif channel.adapter_type == "google_group":
+        provider = GoogleGroupEmailProvider.from_settings()
+        if provider.configured():
+            if not contact or not contact.primary_email:
+                raise HTTPException(400, "Contact has no email address")
+            subject = ticket.subject or "Support reply"
+            token = f"[#TCK-{ticket.id}]"
+            if token not in subject:
+                subject = f"{subject} {token}"
+            try:
+                message.provider_message_id = await provider.send(
+                    contact.primary_email, subject, body.body
+                )
+            except RuntimeError as exc:
+                raise HTTPException(502, str(exc)) from exc
+
     touch_ticket_activity(ticket, now)
 
     if not ticket.first_response_at:
         ticket.first_response_at = now
+
+    claimed = False
+    if not ticket.assignee_user_id and actor.id:
+        ticket.assignee_user_id = actor.id
+        ticket.first_assigned_at = ticket.first_assigned_at or now
+        claimed = True
 
     await mutate(
         session,
@@ -359,6 +413,19 @@ async def send_ticket_message(
         ),
     )
     await commit_and_notify(session)
+    publish_inbox_event(
+        {
+            "type": "message.sent",
+            "ticket_id": str(ticket.id),
+            "channel_kind": channel.kind,
+            "assignee_user_id": ticket.assignee_user_id,
+            "actor_id": actor.id,
+        }
+    )
+    if claimed:
+        publish_inbox_event(
+            {"type": "ticket.claimed", "ticket_id": str(ticket.id), "actor_id": actor.id}
+        )
     return MessageOut(
         id=message.id,
         ticket_id=message.ticket_id,

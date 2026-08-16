@@ -6,6 +6,8 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from phera.db.models import (
     ChannelAccount,
     Connector,
@@ -56,8 +58,13 @@ async def seed_superhealth_workspace(session: AsyncSession, workspace: Workspace
                 )
             )
 
-    for team_slug in ("support_l1", "support_l2", "fertility_sales", "skin_sales"):
-        session.add(Team(id=uuid.uuid4(), workspace_id=workspace.id, name=team_slug, slug=team_slug))
+    for team_slug, team_name in (
+        ("support_agent", "Support agents"),
+        ("support_admin", "Support admins"),
+        ("fertility_sales", "Fertility sales"),
+        ("skin_sales", "Skin sales"),
+    ):
+        session.add(Team(id=uuid.uuid4(), workspace_id=workspace.id, name=team_name, slug=team_slug))
 
     policy = RoutingPolicy(
         id=uuid.uuid4(),
@@ -72,27 +79,27 @@ async def seed_superhealth_workspace(session: AsyncSession, workspace: Workspace
 
     team_q = await session.execute(select(Team).where(Team.workspace_id == workspace.id))
     teams = {team.slug: team for team in team_q.scalars().all()}
-    l1 = teams.get("support_l1")
-    l2 = teams.get("support_l2")
-    if l1:
+    agents = teams.get("support_agent")
+    admins = teams.get("support_admin")
+    if agents:
         session.add(
             RoutingTier(
                 id=uuid.uuid4(),
                 policy_id=policy.id,
-                name="L1",
+                name="Support agents",
                 position=0,
-                team_id=l1.id,
+                team_id=agents.id,
                 overflow_after_seconds=120,
             )
         )
-    if l2:
+    if admins:
         session.add(
             RoutingTier(
                 id=uuid.uuid4(),
                 policy_id=policy.id,
-                name="L2",
+                name="Support admins",
                 position=1,
-                team_id=l2.id,
+                team_id=admins.id,
             )
         )
 

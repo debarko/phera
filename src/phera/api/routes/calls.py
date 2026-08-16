@@ -15,6 +15,7 @@ from phera.db.commit import commit_and_notify, track_outbox_notify
 from phera.db.models import Call, Contact, OutboxEvent, Ticket, Transcript, Workspace
 from phera.modules.connectors.stubs import StubTelephonyProvider
 from phera.modules.tickets.activity import touch_ticket_activity
+from phera.modules.tickets.inbox_events import publish_inbox_event
 
 router = APIRouter(tags=["calls"])
 
@@ -75,6 +76,9 @@ async def start_call(
         ticket = await session.get(Ticket, body.ticket_id)
         if ticket is not None and ticket.workspace_id == workspace.id:
             touch_ticket_activity(ticket)
+            if not ticket.assignee_user_id and actor.id:
+                ticket.assignee_user_id = actor.id
+                ticket.first_assigned_at = ticket.first_assigned_at or datetime.now(UTC)
 
     outbox = OutboxEvent(
         id=uuid.uuid4(),
@@ -90,6 +94,14 @@ async def start_call(
     session.add(outbox)
     track_outbox_notify(session, outbox.id)
     await commit_and_notify(session)
+    if body.ticket_id:
+        publish_inbox_event(
+            {
+                "type": "call.started",
+                "ticket_id": str(body.ticket_id),
+                "actor_id": actor.id,
+            }
+        )
     await session.refresh(call)
     return call
 

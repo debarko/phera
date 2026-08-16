@@ -33,7 +33,7 @@ class RoutingPolicyCreate(BaseModel):
 
 class RoutingTierCreate(BaseModel):
     policy_id: uuid.UUID
-    name: str = "L1"
+    name: str = "Support agents"
     position: int = 0
     team_id: uuid.UUID | None = None
 

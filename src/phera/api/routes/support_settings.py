@@ -11,11 +11,20 @@ from phera.api.deps import get_authenticated_actor, get_db, get_workspace
 from phera.authz.actor import Actor
 from phera.db.commit import commit_and_notify
 from phera.db.models import OwnershipProfile, RoutingPolicy, RoutingTier, Team, Workspace
+from phera.modules.routing.support_teams import ensure_support_routing
+from phera.modules.tickets.reuse_policy import (
+    ASSIGNEE_KEEP,
+    ASSIGNEE_QUEUE,
+    CHANNEL_KINDS,
+    SUPPORT_AGENT_IDS_FLAG,
+    SUPPORT_AGENTS_FLAG,
+    TICKET_REUSE_FLAG,
+    WINDOW_MAX_SECONDS,
+    WINDOW_MIN_SECONDS,
+    parse_ticket_reuse,
+)
 
 router = APIRouter(tags=["support-settings"])
-
-SUPPORT_AGENT_IDS_FLAG = "support_agent_user_ids"
-SUPPORT_AGENTS_FLAG = "support_agents"
 
 
 def _can_manage_support_settings(actor: Actor) -> bool:
@@ -60,18 +69,42 @@ class SupportAgentMember(BaseModel):
     name: str | None = None
 
 
+class TicketReuseChannelOverride(BaseModel):
+    window_seconds: int | None = Field(default=None, ge=WINDOW_MIN_SECONDS, le=WINDOW_MAX_SECONDS)
+    reopen_resolved: bool | None = None
+    reopen_closed: bool | None = None
+
+
+class TicketReusePolicyOut(BaseModel):
+    window_seconds: int
+    reopen_resolved: bool
+    reopen_closed: bool
+    on_reopen_assignee: str
+    channels: dict[str, TicketReuseChannelOverride]
+
+
+class TicketReusePolicyUpdate(BaseModel):
+    window_seconds: int | None = Field(default=None, ge=WINDOW_MIN_SECONDS, le=WINDOW_MAX_SECONDS)
+    reopen_resolved: bool | None = None
+    reopen_closed: bool | None = None
+    on_reopen_assignee: str | None = Field(default=None, pattern="^(keep|queue)$")
+    channels: dict[str, TicketReuseChannelOverride] | None = None
+
+
 class SupportSettingsOut(BaseModel):
     agents: list[SupportAgentMember]
     agent_user_ids: list[str]
     routing_policy: RoutingPolicyDetailOut | None
     routing_tiers: list[RoutingTierOut]
     teams: list[TeamOut]
+    ticket_reuse: TicketReusePolicyOut
 
 
 class SupportSettingsUpdate(BaseModel):
     agents: list[SupportAgentMember] | None = None
     agent_user_ids: list[str] | None = None
-    routing_policy: "RoutingPolicyUpdate | None" = None
+    routing_policy: RoutingPolicyUpdate | None = None
+    ticket_reuse: TicketReusePolicyUpdate | None = None
 
 
 class RoutingPolicyUpdate(BaseModel):
@@ -83,7 +116,9 @@ class RoutingPolicyUpdate(BaseModel):
     offer_ttl_seconds: int | None = Field(default=None, ge=5, le=600)
 
 
-async def _get_or_create_profile(session: AsyncSession, workspace_id: uuid.UUID) -> OwnershipProfile:
+async def _get_or_create_profile(
+    session: AsyncSession, workspace_id: uuid.UUID
+) -> OwnershipProfile:
     profile = await session.get(OwnershipProfile, workspace_id)
     if profile:
         return profile
@@ -150,6 +185,22 @@ def _normalize_agents(flags: dict) -> list[SupportAgentMember]:
     return members
 
 
+def _ticket_reuse_out(flags: dict) -> TicketReusePolicyOut:
+    parsed = parse_ticket_reuse(flags.get(TICKET_REUSE_FLAG))
+    channels = {
+        kind: TicketReuseChannelOverride(**override)
+        for kind, override in (parsed.get("channels") or {}).items()
+        if kind in CHANNEL_KINDS
+    }
+    return TicketReusePolicyOut(
+        window_seconds=parsed["window_seconds"],
+        reopen_resolved=parsed["reopen_resolved"],
+        reopen_closed=parsed["reopen_closed"],
+        on_reopen_assignee=parsed["on_reopen_assignee"],
+        channels=channels,
+    )
+
+
 async def _build_settings(session: AsyncSession, workspace: Workspace) -> SupportSettingsOut:
     profile = await session.get(OwnershipProfile, workspace.id)
     flags = dict(profile.flags or {}) if profile else {}
@@ -178,7 +229,9 @@ async def _build_settings(session: AsyncSession, workspace: Workspace) -> Suppor
             for tier in tq.scalars().all()
         ]
 
-    team_q = await session.execute(select(Team).where(Team.workspace_id == workspace.id).order_by(Team.slug))
+    team_q = await session.execute(
+        select(Team).where(Team.workspace_id == workspace.id).order_by(Team.slug)
+    )
     teams = [
         TeamOut(id=team.id, name=team.name, slug=team.slug)
         for team in team_q.scalars().all()
@@ -190,6 +243,7 @@ async def _build_settings(session: AsyncSession, workspace: Workspace) -> Suppor
         routing_policy=policy_out,
         routing_tiers=tiers,
         teams=teams,
+        ticket_reuse=_ticket_reuse_out(flags),
     )
 
 
@@ -201,6 +255,9 @@ async def get_support_settings(
 ):
     if not _can_manage_support_settings(actor):
         raise HTTPException(403, "Missing support settings permission")
+    await ensure_support_routing(session, workspace.id)
+    if session.new or session.dirty or session.deleted:
+        await commit_and_notify(session)
     return await _build_settings(session, workspace)
 
 
@@ -213,6 +270,8 @@ async def update_support_settings(
 ):
     if not _can_manage_support_settings(actor):
         raise HTTPException(403, "Missing support settings permission")
+
+    await ensure_support_routing(session, workspace.id)
 
     profile = await _get_or_create_profile(session, workspace.id)
     flags = dict(profile.flags or {})
@@ -233,6 +292,32 @@ async def update_support_settings(
             SupportAgentMember(user_id=user_id, access="agent").model_dump()
             for user_id in flags[SUPPORT_AGENT_IDS_FLAG]
         ]
+
+    if body.ticket_reuse is not None:
+        current = parse_ticket_reuse(flags.get(TICKET_REUSE_FLAG))
+        updates = body.ticket_reuse.model_dump(exclude_unset=True)
+        if "window_seconds" in updates and updates["window_seconds"] is not None:
+            current["window_seconds"] = updates["window_seconds"]
+        if "reopen_resolved" in updates and updates["reopen_resolved"] is not None:
+            current["reopen_resolved"] = updates["reopen_resolved"]
+        if "reopen_closed" in updates and updates["reopen_closed"] is not None:
+            current["reopen_closed"] = updates["reopen_closed"]
+        if "on_reopen_assignee" in updates and updates["on_reopen_assignee"] in (
+            ASSIGNEE_KEEP,
+            ASSIGNEE_QUEUE,
+        ):
+            current["on_reopen_assignee"] = updates["on_reopen_assignee"]
+        if "channels" in updates:
+            merged: dict[str, dict] = {}
+            raw_channels = updates["channels"] or {}
+            for kind, override in raw_channels.items():
+                if kind not in CHANNEL_KINDS or not isinstance(override, dict):
+                    continue
+                cleaned = {key: value for key, value in override.items() if value is not None}
+                if cleaned:
+                    merged[kind] = cleaned
+            current["channels"] = merged
+        flags[TICKET_REUSE_FLAG] = parse_ticket_reuse(current)
 
     if body.routing_policy is not None:
         policy = await _default_policy(session, workspace.id)

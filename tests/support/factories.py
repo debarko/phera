@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from phera.authz.actor import Actor
 from phera.db.models import (
+    ChannelAccount,
     Contact,
     Deal,
     Form,
@@ -100,6 +101,23 @@ def deal(
         status=status,
         stage_entered_at=now,
         owner_user_id=owner_user_id,
+    )
+
+
+def channel_account(
+    workspace_id: uuid.UUID,
+    *,
+    kind: str = "messaging",
+    adapter_type: str = "gallabox",
+    address: str = "+919876543210",
+) -> ChannelAccount:
+    return ChannelAccount(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        kind=kind,
+        adapter_type=adapter_type,
+        address=address,
+        is_active=True,
     )
 
 

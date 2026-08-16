@@ -17,10 +17,9 @@ from phera.db.commit import commit_and_notify
 from phera.db.models import AgentPresence, ChannelAccount, Ticket, TicketOffer, Workspace
 from phera.modules.tickets.activity import touch_ticket_activity
 from phera.modules.tickets.enrichment import ticket_detail_dict
+from phera.modules.tickets.inbox_events import publish_inbox_event, subscribe_inbox, unsubscribe_inbox
 
 router = APIRouter(tags=["inbox"])
-
-_inbox_subscribers: set[asyncio.Queue[str]] = set()
 
 _PRIORITY_RANK = case(
     (Ticket.priority.in_(("high", "urgent")), 0),
@@ -43,12 +42,7 @@ def _apply_inbox_order(q, bucket: str):
 
 
 def _publish_inbox_event(payload: dict) -> None:
-    data = json.dumps(payload)
-    for queue in list(_inbox_subscribers):
-        try:
-            queue.put_nowait(data)
-        except asyncio.QueueFull:
-            pass
+    publish_inbox_event(payload)
 
 
 @router.get("/inbox/tickets", response_model=list[TicketDetailOut])
@@ -98,10 +92,14 @@ async def claim_ticket(
         raise HTTPException(404, "Ticket not found")
     ticket.assignee_user_id = actor.id
     ticket.status = "open"
+    if ticket.first_assigned_at is None:
+        ticket.first_assigned_at = datetime.now(UTC)
     touch_ticket_activity(ticket)
     await commit_and_notify(session)
     await session.refresh(ticket)
-    _publish_inbox_event({"type": "ticket.claimed", "ticket_id": str(ticket.id)})
+    _publish_inbox_event(
+        {"type": "ticket.claimed", "ticket_id": str(ticket.id), "actor_id": actor.id}
+    )
     return await ticket_detail_dict(session, ticket)
 
 
@@ -140,8 +138,7 @@ async def inbox_stream(
     request: Request,
     actor: Actor = Depends(get_authenticated_actor),
 ):
-    queue: asyncio.Queue[str] = asyncio.Queue(maxsize=50)
-    _inbox_subscribers.add(queue)
+    queue = subscribe_inbox()
 
     async def event_generator():
         try:
@@ -155,6 +152,14 @@ async def inbox_stream(
                 except TimeoutError:
                     yield ": keepalive\n\n"
         finally:
-            _inbox_subscribers.discard(queue)
+            unsubscribe_inbox(queue)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

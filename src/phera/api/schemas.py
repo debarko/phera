@@ -148,6 +148,9 @@ class TicketDetailOut(TicketOut):
     channel_kind: str | None = None
     channel_address: str | None = None
     channel_adapter_type: str | None = None
+    contact_name: str | None = None
+    contact_phone: str | None = None
+    contact_email: str | None = None
     routing_tier: int = 1
     created_at: datetime | None = None
     updated_at: datetime | None = None

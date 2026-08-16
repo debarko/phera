@@ -39,14 +39,14 @@ class TestActorFromHeaders:
             "x-actor-id": "user-42",
             "x-actor-email": "a@b.com",
             "x-actor-name": "Ada",
-            "x-actor-roles": "support_l1,sales",
+            "x-actor-roles": "support_agent,sales",
             "x-actor-permissions": "crm.deals.read:own,crm.tickets.claim:allow",
             "x-actor-unrestricted": "true",
         }
         actor = actor_from_headers(headers)
         assert actor.id == "user-42"
         assert actor.email == "a@b.com"
-        assert actor.roles == ["support_l1", "sales"]
+        assert actor.roles == ["support_agent", "sales"]
         assert actor.permissions["crm.deals.read"] == "own"
         assert actor.unrestricted is True
 

@@ -58,4 +58,8 @@ OTEL_ENABLED=0 REDIS_URL=
 
 ## Auth
 
-Phera is private to an upstream gateway. It authorizes from `X-Actor-*` headers only — no JWT in the service.
+Phera authorizes from `X-Actor-*` headers only — no JWT in the service.
+
+## Channels
+
+WhatsApp (Gallabox) and email (Google Group → inbound hook) setup: see [CHANNELS.md](CHANNELS.md).
