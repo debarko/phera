@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import random
 import re
+import secrets
 import uuid
 from datetime import UTC, datetime
 
@@ -13,7 +13,7 @@ from tests.support import factories
 
 pytestmark = pytest.mark.integration
 
-SHORT_ID_PATTERN = re.compile(r"^\d{6}-\d{4}$")
+SHORT_ID_PATTERN = re.compile(r"^\d{6}-\d{6}$")
 
 
 def _make_ticket(workspace_id, contact_id, short_id: str) -> Ticket:
@@ -57,11 +57,33 @@ async def test_generation_avoids_an_already_taken_candidate(
     contact = factories.contact(workspace_bundle.workspace.id)
     db_session.add(contact)
     await db_session.flush()
-    db_session.add(_make_ticket(workspace_bundle.workspace.id, contact.id, f"{date_prefix}-0001"))
+    db_session.add(
+        _make_ticket(workspace_bundle.workspace.id, contact.id, f"{date_prefix}-000001")
+    )
     await db_session.flush()
 
-    calls = iter([1, 1, 2])  # first two candidates collide with "-0001", third is free
-    monkeypatch.setattr(random, "randint", lambda a, b: next(calls))
+    calls = iter([1, 1, 2])  # first two candidates collide with "-000001", third is free
+    monkeypatch.setattr(secrets, "randbelow", lambda n: next(calls))
 
     result = await generate_ticket_short_id(db_session)
-    assert result == f"{date_prefix}-0002"
+    assert result == f"{date_prefix}-000002"
+
+
+@pytest.mark.asyncio
+async def test_uses_cryptographically_secure_random_source(
+    db_session, workspace_bundle, monkeypatch
+):
+    """Regression guard: must not fall back to the non-cryptographic `random` module —
+    this id is used to route inbound webhook messages onto an existing ticket, so a
+    predictable generator would make ticket ids guessable."""
+    from phera.modules.tickets import short_id as short_id_module
+
+    calls = {"count": 0}
+
+    def _tracking_randbelow(n):
+        calls["count"] += 1
+        return 42
+
+    monkeypatch.setattr(short_id_module.secrets, "randbelow", _tracking_randbelow)
+    await generate_ticket_short_id(db_session)
+    assert calls["count"] == 1

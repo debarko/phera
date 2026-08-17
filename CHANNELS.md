@@ -61,7 +61,7 @@ Raw RFC822 is also accepted as `{"raw_rfc822": "From: ..."}`.
    - Gmail/Google Workspace: app password, `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_FROM=<group@yourdomain>`
    - `SMTP_FROM` must be allowed to send as the Group (Group → Allow posting / send-as).
 
-Threading order: `In-Reply-To` → subject `[#TCK-<ticket-uuid>]` → same contact + open ticket within 7 days.
+Threading order: `In-Reply-To` → subject `[#YYMMDD-NNNNNN]` (the ticket's short id, a date-bucketed random token — not a sequential counter) → same contact + open ticket within 7 days.
 
 ## Tunnel for local
 
