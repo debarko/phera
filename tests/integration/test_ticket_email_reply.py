@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
 
 from phera.db.models import Message, Ticket
 from phera.modules.connectors.imap_smtp import ImapSmtpEmailProvider
@@ -139,3 +140,26 @@ async def test_second_reply_extends_the_references_chain(client, db_session, wor
     assert calls[0]["references"] == ["<inbound-1@example.com>"]
     assert calls[1]["in_reply_to"] == "<reply-1@example.com>"
     assert calls[1]["references"] == ["<inbound-1@example.com>", "<reply-1@example.com>"]
+
+
+@pytest.mark.asyncio
+async def test_reply_rejected_without_creating_message_when_unconfigured(
+    client, db_session, workspace_bundle
+):
+    """Regression guard: the connector in _setup_ticket_with_history has no secrets, so the
+    real (unpatched) ImapSmtpEmailProvider.from_connector(...).configured() is False. The
+    route must reject before creating a Message, not record a "sent" reply that never
+    actually went out."""
+    ticket, contact = await _setup_ticket_with_history(db_session, workspace_bundle)
+
+    resp = await client.post(
+        f"/v1/tickets/{ticket.id}/messages",
+        headers=AGENT,
+        json={"body": "This should not be recorded as sent."},
+    )
+    assert resp.status_code == 502
+
+    q = await db_session.execute(
+        select(Message).where(Message.ticket_id == ticket.id, Message.direction == "outbound")
+    )
+    assert q.scalars().all() == []

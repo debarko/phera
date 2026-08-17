@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -328,7 +329,7 @@ class EmailPollState(Base, TimestampMixin):
     channel_account_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("channel_accounts.id"), primary_key=True
     )
-    last_uid: Mapped[int] = mapped_column(Integer, default=0)
+    last_uid: Mapped[int] = mapped_column(BigInteger, default=0)
     last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(16), default="idle")
     last_error: Mapped[str | None] = mapped_column(Text)

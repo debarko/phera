@@ -53,8 +53,16 @@ def _header(msg: email.message.Message, name: str) -> str | None:
     return value.strip() if value else None
 
 
-def parse_rfc822(raw: str) -> dict:
-    msg = email.message_from_string(raw)
+def parse_rfc822(raw: str | bytes) -> dict:
+    # Parse from bytes when available (message_from_bytes) rather than decoding the whole
+    # message to str first — each part's body is still decoded per its own declared
+    # charset below, so this avoids a premature, lossy top-level UTF-8 decode of the
+    # entire message for non-UTF-8 mail.
+    msg = (
+        email.message_from_bytes(raw)
+        if isinstance(raw, bytes)
+        else email.message_from_string(raw)
+    )
     body = None
     if msg.is_multipart():
         for part in msg.walk():

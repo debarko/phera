@@ -87,6 +87,21 @@ def _encrypted_secrets(secrets: dict[str, str]) -> str | None:
     return encrypt_secrets(secrets)
 
 
+_SENSITIVE_KEY_MARKERS = ("password", "secret", "token", "key")
+
+
+def _reject_secret_shaped_credentials(credentials: dict) -> None:
+    """`credentials` is stored in plaintext JSONB and echoed back in API responses —
+    anything secret-shaped belongs in `secrets` (encrypted), not here."""
+    flagged = [k for k in credentials if any(m in k.lower() for m in _SENSITIVE_KEY_MARKERS)]
+    if flagged:
+        raise HTTPException(
+            400,
+            f"credentials contains secret-shaped key(s) {flagged} — put these in "
+            "'secrets' instead, they are encrypted at rest there.",
+        )
+
+
 async def _test_connector_credentials(
     connector_type: str, credentials: dict, secrets: dict
 ) -> ConnectorTestResult:
@@ -120,6 +135,7 @@ async def create_connector(
     actor: Actor = Depends(get_authenticated_actor),
 ):
     _require_manage(actor)
+    _reject_secret_shaped_credentials(body.credentials)
     connector = Connector(
         id=uuid.uuid4(),
         workspace_id=workspace.id,
@@ -148,6 +164,7 @@ async def update_connector(
     if body.name is not None:
         connector.name = body.name
     if body.credentials is not None:
+        _reject_secret_shaped_credentials(body.credentials)
         connector.credentials = body.credentials
     if body.is_active is not None:
         connector.is_active = body.is_active
@@ -244,6 +261,7 @@ async def create_email_channel(
     actor: Actor = Depends(get_authenticated_actor),
 ):
     _require_manage(actor)
+    _reject_secret_shaped_credentials(body.credentials)
     connector = Connector(
         id=uuid.uuid4(),
         workspace_id=workspace.id,
@@ -298,6 +316,7 @@ async def create_whatsapp_channel(
     actor: Actor = Depends(get_authenticated_actor),
 ):
     _require_manage(actor)
+    _reject_secret_shaped_credentials(body.credentials)
     connector = Connector(
         id=uuid.uuid4(),
         workspace_id=workspace.id,

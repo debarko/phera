@@ -229,9 +229,8 @@ async def run_worker_loop() -> None:
                     from phera.db.models import Workspace as _Workspace
                     from phera.modules.tickets.email_poll import poll_all_email_accounts
 
-                    ws_q = await session.execute(select(_Workspace).limit(1))
-                    ws = ws_q.scalar_one_or_none()
-                    if ws:
+                    ws_q = await session.execute(select(_Workspace))
+                    for ws in ws_q.scalars():
                         await poll_all_email_accounts(session, ws)
 
                 await session.commit()

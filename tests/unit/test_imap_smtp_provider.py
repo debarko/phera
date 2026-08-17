@@ -80,3 +80,21 @@ def test_from_connector_without_secrets_has_empty_password(monkeypatch):
     )
     provider = ImapSmtpEmailProvider.from_connector(connector)
     assert provider.password == ""
+
+
+def test_configured_false_when_only_password_missing(monkeypatch):
+    """Regression guard: every other field present, only the password blank — must still
+    report unconfigured, otherwise the worker attempts an IMAP/SMTP login with an empty
+    password instead of failing cleanly with a clear "not configured" error."""
+    connector = _connector(
+        monkeypatch,
+        credentials={
+            "imap_host": "imap.example.com",
+            "smtp_host": "smtp.example.com",
+            "username": "u",
+            "from_address": "u@example.com",
+        },
+        password=None,
+    )
+    provider = ImapSmtpEmailProvider.from_connector(connector)
+    assert provider.configured() is False

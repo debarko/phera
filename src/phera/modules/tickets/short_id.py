@@ -20,6 +20,7 @@ import secrets
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from phera.db.models import Ticket
@@ -30,11 +31,46 @@ _SUFFIX_MAX = 10**_SUFFIX_DIGITS
 
 
 async def generate_ticket_short_id(session: AsyncSession) -> str:
+    """A candidate that passed this pre-check is not yet reserved — callers that insert a
+    Ticket with it should still handle a unique-constraint violation (see
+    `tickets.py::create_ticket` / `inbound.py::_reuse_or_create_ticket`), since a concurrent
+    insert can win the same id between this check and the caller's own commit."""
     date_prefix = datetime.now(UTC).strftime("%y%m%d")
     for _ in range(_MAX_ATTEMPTS):
         candidate = f"{date_prefix}-{secrets.randbelow(_SUFFIX_MAX):0{_SUFFIX_DIGITS}d}"
         q = await session.execute(select(Ticket.id).where(Ticket.short_id == candidate))
         if q.scalar_one_or_none() is None:
             return candidate
-    # Vanishingly unlikely after _MAX_ATTEMPTS collisions — widen the suffix as a fallback.
-    return f"{date_prefix}-{secrets.randbelow(10**9):09d}"
+    # 10 straight collisions in a 1,000,000-value keyspace is astronomically unlikely — if
+    # it ever happens, fail loudly rather than silently emit an id outside the documented
+    # YYMMDD-NNNNNN format (which the subject-token regex would then never match again).
+    raise RuntimeError(
+        f"Could not allocate a unique ticket short_id for {date_prefix} after "
+        f"{_MAX_ATTEMPTS} attempts"
+    )
+
+
+_INSERT_RETRY_ATTEMPTS = 3
+
+
+async def insert_ticket_with_short_id(session: AsyncSession, ticket: Ticket) -> None:
+    """Assign a short_id to `ticket` and insert it, retrying with a fresh id if a
+    concurrent request already reserved the same one between generate_ticket_short_id's
+    own pre-check and this insert (belt-and-suspenders around the DB's unique constraint).
+    `ticket` must be fully populated except for `short_id` and must not already be added
+    to the session.
+    """
+    last_error: IntegrityError | None = None
+    for _ in range(_INSERT_RETRY_ATTEMPTS):
+        ticket.short_id = await generate_ticket_short_id(session)
+        session.add(ticket)
+        try:
+            # Nested (SAVEPOINT) so a collision only unwinds this insert, not other
+            # unrelated pending work already in the caller's session.
+            async with session.begin_nested():
+                await session.flush()
+            return
+        except IntegrityError as exc:
+            session.expunge(ticket)
+            last_error = exc
+    raise RuntimeError("Could not insert ticket with a unique short_id") from last_error

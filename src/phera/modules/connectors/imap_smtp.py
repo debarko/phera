@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import smtplib
+import ssl
 from email.message import EmailMessage
 from email.utils import make_msgid
 from typing import Any
@@ -69,7 +70,13 @@ class ImapSmtpEmailProvider(EmailProvider):
         )
 
     def configured(self) -> bool:
-        return bool(self.imap_host and self.smtp_host and self.username and self.from_address)
+        return bool(
+            self.imap_host
+            and self.smtp_host
+            and self.username
+            and self.password
+            and self.from_address
+        )
 
     async def send(self, to: str, subject: str, body: str, **kwargs: Any) -> str:
         if not self.smtp_host or not self.from_address:
@@ -91,13 +98,13 @@ class ImapSmtpEmailProvider(EmailProvider):
         def _send() -> None:
             with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as smtp:
                 if self.smtp_use_tls:
-                    smtp.starttls()
+                    smtp.starttls(context=ssl.create_default_context())
                 if self.username:
                     smtp.login(self.username, self.password)
                 smtp.send_message(msg)
 
         await asyncio.to_thread(_send)
-        logger.info("IMAP/SMTP connector send to=%s subject=%s", to, subject)
+        logger.info("IMAP/SMTP connector send message_id=%s", message_id)
         return str(message_id)
 
     async def fetch_new_messages(self, since_uid: int | None) -> tuple[list[dict], int]:
@@ -125,7 +132,10 @@ class ImapSmtpEmailProvider(EmailProvider):
                     raw = data.get(b"RFC822")
                     if raw is None:
                         continue
-                    messages.append({"uid": uid, "raw": raw.decode("utf-8", errors="replace")})
+                    # Keep the raw bytes as-is — parse_rfc822 accepts bytes and decodes
+                    # each body part per its own declared charset, so no lossy top-level
+                    # UTF-8 decode happens here.
+                    messages.append({"uid": uid, "raw": raw})
                     new_watermark = max(new_watermark, uid)
             return messages, new_watermark
         finally:
@@ -162,7 +172,7 @@ def _test_credentials_sync(credentials: dict, secrets: dict) -> dict:
             credentials.get("smtp_host", ""), int(credentials.get("smtp_port", 587)), timeout=10
         ) as smtp:
             if credentials.get("smtp_use_tls", True):
-                smtp.starttls()
+                smtp.starttls(context=ssl.create_default_context())
             if username:
                 smtp.login(username, password)
         smtp_ok = True

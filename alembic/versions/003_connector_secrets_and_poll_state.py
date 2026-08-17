@@ -23,7 +23,7 @@ def upgrade() -> None:
     op.create_table(
         "email_poll_state",
         sa.Column("channel_account_id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("last_uid", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("last_uid", sa.BigInteger(), nullable=False, server_default="0"),
         sa.Column("last_polled_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("status", sa.String(16), nullable=False, server_default="idle"),
         sa.Column("last_error", sa.Text(), nullable=True),

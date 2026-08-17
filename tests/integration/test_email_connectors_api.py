@@ -275,3 +275,44 @@ async def test_connector_test_endpoint_uses_provider_check(client, monkeypatch, 
     assert resp.status_code == 200
     body = resp.json()
     assert body == {"ok": None, "imap_ok": True, "smtp_ok": False, "error": "SMTP: boom"}
+
+
+@pytest.mark.asyncio
+async def test_create_connector_rejects_secret_shaped_credentials(client, workspace_bundle):
+    """`credentials` is stored in plaintext JSONB and echoed back in API responses — a
+    secret smuggled in there instead of `secrets` would bypass encryption entirely."""
+    resp = await client.post(
+        "/v1/connectors",
+        headers=ADMIN,
+        json={
+            "type": "email_imap_smtp",
+            "name": "Sneaky",
+            "credentials": {"imap_host": "imap.example.com", "password": "sneaky-plaintext"},
+            "secrets": {},
+        },
+    )
+    assert resp.status_code == 400
+    assert "password" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_connector_rejects_secret_shaped_credentials(client, workspace_bundle):
+    create = await client.post(
+        "/v1/connectors",
+        headers=ADMIN,
+        json={
+            "type": "email_imap_smtp",
+            "name": "Fine",
+            "credentials": {"imap_host": "imap.example.com"},
+            "secrets": {"password": "real-secret"},
+        },
+    )
+    connector_id = create.json()["id"]
+
+    resp = await client.patch(
+        f"/v1/connectors/{connector_id}",
+        headers=ADMIN,
+        json={"credentials": {"imap_host": "imap.example.com", "api_key": "sneaky"}},
+    )
+    assert resp.status_code == 400
+    assert "api_key" in resp.json()["detail"]

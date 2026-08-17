@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 from sqlalchemy import select
 
@@ -11,7 +13,9 @@ from tests.support import factories
 pytestmark = pytest.mark.integration
 
 
-def _raw_email(*, from_addr: str, to_addr: str, subject: str, message_id: str, body: str) -> str:
+def _raw_email(*, from_addr: str, to_addr: str, subject: str, message_id: str, body: str) -> bytes:
+    # bytes, matching what imap_smtp.py's real IMAP fetch now yields (no premature
+    # top-level decode) — parse_rfc822 handles bytes directly.
     return (
         f"From: {from_addr}\r\n"
         f"To: {to_addr}\r\n"
@@ -19,7 +23,7 @@ def _raw_email(*, from_addr: str, to_addr: str, subject: str, message_id: str, b
         f"Message-ID: {message_id}\r\n"
         "\r\n"
         f"{body}\r\n"
-    )
+    ).encode()
 
 
 class FakeProvider:
@@ -153,7 +157,8 @@ async def test_poll_strips_quoted_reply_but_keeps_full_text_in_raw(
     q = await db_session.execute(select(Message))
     message = q.scalars().one()
     assert message.body == "Yes, it worked."
-    assert "I am checking whether this worked or not" in message.raw["raw_rfc822"]
+    stored_original = base64.b64decode(message.raw["raw_rfc822_b64"]).decode("utf-8")
+    assert "I am checking whether this worked or not" in stored_original
 
 
 @pytest.mark.asyncio

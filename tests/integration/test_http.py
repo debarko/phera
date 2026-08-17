@@ -188,6 +188,19 @@ async def test_gallabox_webhook_verifies_per_connector_secret(
     )
     assert resp_wrong.status_code == 401
 
+    # The actual cross-number bypass: a payload addressed to Number A, correctly signed
+    # with Number B's *valid* secret, must NOT be accepted for Number A. Verification is
+    # bound to the connector resolved from the payload's own target number, not "any
+    # active secret in the workspace".
+    body_d = _payload_for("+911111111111", "msg-a-3")
+    sig_using_b_secret = hmac.new(b"secret-b", body_d, hashlib.sha256).hexdigest()
+    resp_cross = await client.post(
+        "/hooks/gallabox/whatsapp",
+        content=body_d,
+        headers={"content-type": "application/json", "x-gallabox-signature": sig_using_b_secret},
+    )
+    assert resp_cross.status_code == 401
+
     get_settings.cache_clear()
 
 

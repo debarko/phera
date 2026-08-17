@@ -26,7 +26,8 @@ def upgrade() -> None:
             WHERE short_id IS NULL
         )
         UPDATE tickets t
-        SET short_id = to_char(t.created_at, 'YYMMDD') || '-' || lpad(numbered.rn::text, 4, '0')
+        SET short_id = to_char(t.created_at, 'YYMMDD') || '-' ||
+            lpad(numbered.rn::text, GREATEST(6, length(numbered.rn::text)), '0')
         FROM numbered
         WHERE t.id = numbered.id
         """

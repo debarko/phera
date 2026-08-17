@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +11,7 @@ from phera.api.deps import get_authenticated_actor, get_db, get_workspace
 from phera.api.schemas import ORMModel
 from phera.authz.actor import Actor
 from phera.db.commit import commit_and_notify
-from phera.db.models import ChannelAccount, LifecycleDestination, Workspace
+from phera.db.models import ChannelAccount, Connector, LifecycleDestination, Workspace
 
 router = APIRouter(tags=["channels"])
 
@@ -65,6 +65,15 @@ async def create_channel_account(
     workspace: Workspace = Depends(get_workspace),
     actor: Actor = Depends(get_authenticated_actor),
 ):
+    if body.connector_id is not None:
+        connector = await session.get(Connector, body.connector_id)
+        if (
+            not connector
+            or connector.workspace_id != workspace.id
+            or not connector.is_active
+        ):
+            raise HTTPException(400, "Unknown or inactive connector")
+
     account = ChannelAccount(id=uuid.uuid4(), workspace_id=workspace.id, **body.model_dump())
     session.add(account)
     await commit_and_notify(session)

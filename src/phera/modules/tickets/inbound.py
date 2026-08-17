@@ -23,14 +23,14 @@ from phera.modules.tickets.reuse_policy import (
     load_reuse_policy,
     support_agent_ids,
 )
-from phera.modules.tickets.short_id import generate_ticket_short_id
+from phera.modules.tickets.short_id import insert_ticket_with_short_id
 
 SHORT_ID_IN_SUBJECT = re.compile(r"\[#(\d{6}-\d{4,6})\]")
 
 logger = logging.getLogger(__name__)
 
 
-async def _channel_account(
+async def resolve_channel_account(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     *,
@@ -54,17 +54,19 @@ async def _channel_account(
         for account in accounts:
             if account.address and hint in account.address.lower().replace(" ", ""):
                 return account
-    if len(accounts) > 1:
-        logger.warning(
-            "Ambiguous channel_account match kind=%s adapter_type=%s hint=%r — "
-            "%d active accounts, falling back to first (id=%s)",
-            kind,
-            adapter_type,
-            address_hint,
-            len(accounts),
-            accounts[0].id,
-        )
-    return accounts[0]
+    if len(accounts) == 1:
+        return accounts[0]
+    # 0 or 2+ candidates with no address match: routing to an arbitrary account risks
+    # placing one customer's message on a different mailbox/number. Reject rather than guess.
+    logger.warning(
+        "Ambiguous channel_account match kind=%s adapter_type=%s hint=%r — "
+        "%d active accounts, no unambiguous match — rejecting",
+        kind,
+        adapter_type,
+        address_hint,
+        len(accounts),
+    )
+    return None
 
 
 async def _find_or_create_contact(
@@ -195,14 +197,12 @@ async def _reuse_or_create_ticket(
         workspace_id=workspace_id,
         contact_id=contact.id,
         channel_account_id=channel.id,
-        short_id=await generate_ticket_short_id(session),
         subject=subject_text,
         status="open",
         last_activity_at=now,
         status_entered_at=now,
     )
-    session.add(ticket)
-    await session.flush()
+    await insert_ticket_with_short_id(session, ticket)
     return ticket, True
 
 
@@ -228,7 +228,7 @@ async def ingest_inbound_message(
     workspace: Workspace,
     inbound: dict,
 ) -> dict:
-    channel = await _channel_account(
+    channel = await resolve_channel_account(
         session,
         workspace.id,
         kind=inbound["channel_kind"],

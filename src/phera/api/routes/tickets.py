@@ -38,7 +38,7 @@ from phera.modules.connectors.imap_smtp import ImapSmtpEmailProvider
 from phera.modules.tickets.activity import touch_ticket_activity
 from phera.modules.tickets.enrichment import channel_for_ticket, ticket_detail_dict
 from phera.modules.tickets.inbox_events import publish_inbox_event
-from phera.modules.tickets.short_id import generate_ticket_short_id
+from phera.modules.tickets.short_id import insert_ticket_with_short_id
 
 router = APIRouter(tags=["tickets"])
 
@@ -95,13 +95,11 @@ async def create_ticket(
     ticket = Ticket(
         id=uuid.uuid4(),
         workspace_id=workspace.id,
-        short_id=await generate_ticket_short_id(session),
         status_entered_at=now,
         last_activity_at=now,
         **body.model_dump(),
     )
-    session.add(ticket)
-    await session.flush()
+    await insert_ticket_with_short_id(session, ticket)
     await mutate(
         session,
         MutateRequest(
@@ -360,6 +358,36 @@ async def send_ticket_message(
     if not channel:
         raise HTTPException(400, "Channel account not found")
 
+    # Resolve and validate the provider BEFORE creating a Message row — otherwise an
+    # unavailable/unconfigured connector still gets recorded and returned as a "sent"
+    # outbound message even though nothing was actually delivered.
+    provider = None
+    if channel.adapter_type == "gallabox":
+        if channel.connector_id:
+            connector = await session.get(Connector, channel.connector_id)
+            provider = GallaboxMessagingProvider.from_connector(connector) if connector else None
+        else:
+            provider = GallaboxMessagingProvider.from_settings()
+    elif channel.adapter_type in ("google_group", "imap_smtp"):
+        if channel.connector_id:
+            connector = await session.get(Connector, channel.connector_id)
+            provider = ImapSmtpEmailProvider.from_connector(connector) if connector else None
+        else:
+            provider = GoogleGroupEmailProvider.from_settings()
+    else:
+        raise HTTPException(400, f"Unsupported channel adapter_type: {channel.adapter_type}")
+
+    if not provider or not provider.configured():
+        raise HTTPException(502, "This channel is not configured for sending")
+
+    contact = await session.get(Contact, ticket.contact_id)
+    if channel.adapter_type == "gallabox":
+        if not contact or not contact.primary_phone:
+            raise HTTPException(400, "Contact has no phone number for WhatsApp")
+    else:
+        if not contact or not contact.primary_email:
+            raise HTTPException(400, "Contact has no email address")
+
     now = datetime.now(UTC)
     message = Message(
         id=uuid.uuid4(),
@@ -378,54 +406,37 @@ async def send_ticket_message(
     session.add(message)
     await session.flush()
 
-    contact = await session.get(Contact, ticket.contact_id)
     if channel.adapter_type == "gallabox":
-        if channel.connector_id:
-            connector = await session.get(Connector, channel.connector_id)
-            provider = GallaboxMessagingProvider.from_connector(connector) if connector else None
-        else:
-            provider = GallaboxMessagingProvider.from_settings()
-        if provider and provider.configured():
-            if not contact or not contact.primary_phone:
-                raise HTTPException(400, "Contact has no phone number for WhatsApp")
-            try:
-                message.provider_message_id = await provider.send(
-                    contact.primary_phone,
-                    body.body,
-                    name=contact.name,
-                )
-            except RuntimeError as exc:
-                raise HTTPException(502, str(exc)) from exc
-    elif channel.adapter_type in ("google_group", "imap_smtp"):
-        if channel.connector_id:
-            connector = await session.get(Connector, channel.connector_id)
-            provider = ImapSmtpEmailProvider.from_connector(connector) if connector else None
-        else:
-            provider = GoogleGroupEmailProvider.from_settings()
-        if provider and provider.configured():
-            if not contact or not contact.primary_email:
-                raise HTTPException(400, "Contact has no email address")
-            subject = ticket.subject or "Support reply"
-            if ticket.short_id:
-                token = f"[#{ticket.short_id}]"
-                if token not in subject:
-                    subject = f"{subject} {token}"
-            in_reply_to, references = await _email_thread_headers(session, ticket.id)
-            try:
-                message.provider_message_id = await provider.send(
-                    contact.primary_email,
-                    subject,
-                    body.body,
-                    in_reply_to=in_reply_to,
-                    references=references,
-                )
-            except RuntimeError as exc:
-                raise HTTPException(502, str(exc)) from exc
-            message.thread_keys = {
-                "rfc_message_id": message.provider_message_id,
-                "in_reply_to": in_reply_to,
-                "references": references,
-            }
+        try:
+            message.provider_message_id = await provider.send(
+                contact.primary_phone,
+                body.body,
+                name=contact.name,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(502, str(exc)) from exc
+    else:
+        subject = ticket.subject or "Support reply"
+        if ticket.short_id:
+            token = f"[#{ticket.short_id}]"
+            if token not in subject:
+                subject = f"{subject} {token}"
+        in_reply_to, references = await _email_thread_headers(session, ticket.id)
+        try:
+            message.provider_message_id = await provider.send(
+                contact.primary_email,
+                subject,
+                body.body,
+                in_reply_to=in_reply_to,
+                references=references,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        message.thread_keys = {
+            "rfc_message_id": message.provider_message_id,
+            "in_reply_to": in_reply_to,
+            "references": references,
+        }
 
     touch_ticket_activity(ticket, now)
 
