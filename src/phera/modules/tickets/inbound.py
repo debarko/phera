@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -21,6 +23,11 @@ from phera.modules.tickets.reuse_policy import (
     load_reuse_policy,
     support_agent_ids,
 )
+from phera.modules.tickets.short_id import generate_ticket_short_id
+
+SHORT_ID_IN_SUBJECT = re.compile(r"\[#(\d{6}-\d{4,6})\]")
+
+logger = logging.getLogger(__name__)
 
 
 async def _channel_account(
@@ -47,6 +54,16 @@ async def _channel_account(
         for account in accounts:
             if account.address and hint in account.address.lower().replace(" ", ""):
                 return account
+    if len(accounts) > 1:
+        logger.warning(
+            "Ambiguous channel_account match kind=%s adapter_type=%s hint=%r — "
+            "%d active accounts, falling back to first (id=%s)",
+            kind,
+            adapter_type,
+            address_hint,
+            len(accounts),
+            accounts[0].id,
+        )
     return accounts[0]
 
 
@@ -119,14 +136,17 @@ async def _reuse_or_create_ticket(
                 return ticket, False
 
     subject = inbound.get("subject") or ""
-    if "[#TCK-" in subject:
-        public = subject.split("[#TCK-", 1)[1].split("]", 1)[0].strip()
-        try:
-            ticket = await session.get(Ticket, uuid.UUID(public))
-            if ticket and policy.allows_status(ticket.status):
-                return ticket, False
-        except ValueError:
-            pass
+    match = SHORT_ID_IN_SUBJECT.search(subject)
+    if match:
+        q = await session.execute(
+            select(Ticket).where(
+                Ticket.workspace_id == workspace_id,
+                Ticket.short_id == match.group(1),
+            )
+        )
+        ticket = q.scalar_one_or_none()
+        if ticket and policy.allows_status(ticket.status):
+            return ticket, False
 
     cutoff = datetime.now(UTC) - timedelta(seconds=policy.window_seconds)
     statuses = policy.reusable_statuses()
@@ -175,6 +195,7 @@ async def _reuse_or_create_ticket(
         workspace_id=workspace_id,
         contact_id=contact.id,
         channel_account_id=channel.id,
+        short_id=await generate_ticket_short_id(session),
         subject=subject_text,
         status="open",
         last_activity_at=now,

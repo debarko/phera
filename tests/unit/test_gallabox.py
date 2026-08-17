@@ -1,6 +1,37 @@
 from __future__ import annotations
 
-from phera.modules.connectors.gallabox import is_status_or_outbound, parse_inbound, verify_signature
+import uuid
+
+import pytest
+from cryptography.fernet import Fernet
+
+from phera.db.models import Connector
+from phera.modules.connectors.gallabox import (
+    GallaboxMessagingProvider,
+    is_status_or_outbound,
+    parse_inbound,
+    verify_signature,
+)
+from phera.modules.connectors.gallabox import (
+    test_gallabox_credentials as check_gallabox_credentials,
+)
+from phera.security import crypto
+from phera.settings import Settings
+
+
+def _connector(monkeypatch, *, credentials: dict, secrets: dict | None) -> Connector:
+    settings = Settings(credentials_encryption_key=Fernet.generate_key().decode())
+    monkeypatch.setattr(crypto, "get_settings", lambda: settings)
+    secrets_encrypted = crypto.encrypt_secrets(secrets) if secrets else None
+    return Connector(
+        id=uuid.uuid4(),
+        workspace_id=uuid.uuid4(),
+        type="gallabox",
+        name="Test WhatsApp",
+        credentials=credentials,
+        secrets_encrypted=secrets_encrypted,
+        is_active=True,
+    )
 
 
 def test_verify_signature_skipped_when_secret_empty():
@@ -47,3 +78,60 @@ def test_parse_simple_from_and_text():
     assert inbound is not None
     assert inbound["contact_phone"] == "+919876543210"
     assert inbound["body"] == "Hello"
+
+
+def test_from_connector_maps_fields(monkeypatch):
+    connector = _connector(
+        monkeypatch,
+        credentials={"account_id": "acc-1", "channel_id": "ch-1"},
+        secrets={"api_key": "key-1", "api_secret": "secret-1"},
+    )
+    provider = GallaboxMessagingProvider.from_connector(connector)
+    assert provider.account_id == "acc-1"
+    assert provider.channel_id == "ch-1"
+    assert provider.api_key == "key-1"
+    assert provider.api_secret == "secret-1"
+    assert provider.endpoint == "https://server.gallabox.com/devapi/messages/whatsapp"
+    assert provider.configured() is True
+
+
+def test_from_connector_custom_endpoint(monkeypatch):
+    connector = _connector(
+        monkeypatch,
+        credentials={"account_id": "acc-1", "channel_id": "ch-1", "endpoint": "https://custom/api"},
+        secrets={"api_key": "key-1", "api_secret": "secret-1"},
+    )
+    provider = GallaboxMessagingProvider.from_connector(connector)
+    assert provider.endpoint == "https://custom/api"
+
+
+def test_configured_false_when_missing_fields(monkeypatch):
+    connector = _connector(monkeypatch, credentials={}, secrets=None)
+    provider = GallaboxMessagingProvider.from_connector(connector)
+    assert provider.configured() is False
+
+
+def test_from_connector_without_secrets_has_empty_strings(monkeypatch):
+    connector = _connector(
+        monkeypatch, credentials={"account_id": "acc-1", "channel_id": "ch-1"}, secrets=None
+    )
+    provider = GallaboxMessagingProvider.from_connector(connector)
+    assert provider.api_key == ""
+    assert provider.api_secret == ""
+
+
+@pytest.mark.asyncio
+async def test_test_gallabox_credentials_ok():
+    result = await check_gallabox_credentials(
+        {"account_id": "a", "channel_id": "c"},
+        {"api_key": "k", "api_secret": "s"},
+    )
+    assert result == {"ok": True, "error": None}
+
+
+@pytest.mark.asyncio
+async def test_test_gallabox_credentials_reports_missing_fields():
+    result = await check_gallabox_credentials({}, {})
+    assert result["ok"] is False
+    assert "api_key" in result["error"]
+    assert "account_id" in result["error"]

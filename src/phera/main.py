@@ -12,6 +12,7 @@ from phera.api.routes import (
     broadcasts,
     calls,
     channels,
+    connectors,
     contacts,
     forms,
     health,
@@ -75,6 +76,7 @@ def create_app(*, run_worker: bool = False) -> FastAPI:
     app.include_router(routing_settings.router, prefix="/v1")
     app.include_router(support_settings.router, prefix="/v1")
     app.include_router(channels.router, prefix="/v1")
+    app.include_router(connectors.router, prefix="/v1")
     app.include_router(calls.router, prefix="/v1")
     app.include_router(broadcasts.router, prefix="/v1")
 

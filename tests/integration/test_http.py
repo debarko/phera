@@ -96,6 +96,102 @@ async def test_gallabox_webhook_creates_ticket(client, db_session, workspace_bun
 
 
 @pytest.mark.asyncio
+async def test_gallabox_webhook_verifies_per_connector_secret(
+    client, db_session, workspace_bundle, monkeypatch
+):
+    import hashlib
+    import hmac
+
+    from cryptography.fernet import Fernet
+
+    from phera.security import crypto
+    from phera.settings import Settings, get_settings
+
+    settings = Settings(credentials_encryption_key=Fernet.generate_key().decode())
+    monkeypatch.setattr(crypto, "get_settings", lambda: settings)
+    get_settings.cache_clear()
+
+    conn_a = factories.connector(
+        workspace_bundle.workspace.id,
+        type="gallabox",
+        name="Number A",
+        secrets_encrypted=crypto.encrypt_secrets({"webhook_secret": "secret-a"}),
+    )
+    conn_b = factories.connector(
+        workspace_bundle.workspace.id,
+        type="gallabox",
+        name="Number B",
+        secrets_encrypted=crypto.encrypt_secrets({"webhook_secret": "secret-b"}),
+    )
+    db_session.add_all([conn_a, conn_b])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            factories.channel_account(
+                workspace_bundle.workspace.id,
+                kind="messaging",
+                adapter_type="gallabox",
+                address="+911111111111",
+                connector_id=conn_a.id,
+            ),
+            factories.channel_account(
+                workspace_bundle.workspace.id,
+                kind="messaging",
+                adapter_type="gallabox",
+                address="+922222222222",
+                connector_id=conn_b.id,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    def _payload_for(number: str, msg_id: str) -> bytes:
+        import json
+
+        return json.dumps(
+            {
+                "event": "Message.received",
+                "data": {
+                    "id": msg_id,
+                    "whatsappNumber": number,
+                    "contact": {"name": "Patient", "phone": "919000000000"},
+                    "message": {"whatsapp": {"type": "text", "text": {"body": "hi"}}},
+                },
+            }
+        ).encode()
+
+    body_a = _payload_for("+911111111111", "msg-a-1")
+    sig_a = hmac.new(b"secret-a", body_a, hashlib.sha256).hexdigest()
+    resp_a = await client.post(
+        "/hooks/gallabox/whatsapp",
+        content=body_a,
+        headers={"content-type": "application/json", "x-gallabox-signature": sig_a},
+    )
+    assert resp_a.status_code == 200
+    assert resp_a.json()["created_ticket"] is True
+
+    body_b = _payload_for("+922222222222", "msg-b-1")
+    sig_b = hmac.new(b"secret-b", body_b, hashlib.sha256).hexdigest()
+    resp_b = await client.post(
+        "/hooks/gallabox/whatsapp",
+        content=body_b,
+        headers={"content-type": "application/json", "x-gallabox-signature": sig_b},
+    )
+    assert resp_b.status_code == 200
+    assert resp_b.json()["created_ticket"] is True
+
+    body_c = _payload_for("+911111111111", "msg-a-2")
+    resp_wrong = await client.post(
+        "/hooks/gallabox/whatsapp",
+        content=body_c,
+        headers={"content-type": "application/json", "x-gallabox-signature": "not-a-real-sig"},
+    )
+    assert resp_wrong.status_code == 401
+
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
 async def test_google_group_webhook_creates_ticket(client, db_session, workspace_bundle):
     db_session.add(
         factories.channel_account(

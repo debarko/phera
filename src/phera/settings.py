@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     email_webhook_secret: str = ""
     email_inbound_address: str = ""
 
+    credentials_encryption_key: str = ""
+
     @property
     def worker_queue_list(self) -> list[str]:
         return [q.strip() for q in self.worker_queues.split(",") if q.strip()]

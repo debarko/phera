@@ -209,6 +209,59 @@ async def test_channel_override_window(db_session, workspace_bundle):
 
 
 @pytest.mark.asyncio
+async def test_subject_short_id_token_reuses_ticket_across_contacts(db_session, workspace_bundle):
+    ws = workspace_bundle.workspace
+    db_session.add(
+        factories.channel_account(
+            ws.id, kind="email", adapter_type="google_group", address="support@example.com"
+        )
+    )
+    await db_session.flush()
+
+    first = await ingest_inbound_message(
+        db_session,
+        ws,
+        {
+            "channel_kind": "email",
+            "adapter_type": "google_group",
+            "address_hint": "support@example.com",
+            "contact_name": "Original Patient",
+            "contact_email": "original@example.com",
+            "provider_message_id": "<msg-orig@example.com>",
+            "subject": "Need reports",
+            "body": "Please send my reports.",
+            "thread_keys": {},
+            "raw": {},
+        },
+    )
+    assert first["created_ticket"] is True
+    ticket = await db_session.get(Ticket, UUID(str(first["ticket_id"])))
+    assert ticket.short_id is not None
+
+    # A different contact, no in_reply_to, but the subject carries the same [#short_id] token
+    # (e.g. they hit "reply" on a forwarded copy) — tier 2 should still route it to the
+    # same ticket even though tier 3's contact-based fallback would not have matched.
+    second = await ingest_inbound_message(
+        db_session,
+        ws,
+        {
+            "channel_kind": "email",
+            "adapter_type": "google_group",
+            "address_hint": "support@example.com",
+            "contact_name": "Someone Else",
+            "contact_email": "someone-else@example.com",
+            "provider_message_id": "<msg-other@example.com>",
+            "subject": f"Re: Need reports [#{ticket.short_id}]",
+            "body": "Following up.",
+            "thread_keys": {},
+            "raw": {},
+        },
+    )
+    assert second["created_ticket"] is False
+    assert second["ticket_id"] == str(ticket.id)
+
+
+@pytest.mark.asyncio
 async def test_support_settings_exposes_and_saves_ticket_reuse(client, workspace_bundle):
     got = await client.get("/v1/support/settings", headers=ADMIN)
     assert got.status_code == 200

@@ -11,7 +11,9 @@ from typing import Any
 
 import httpx
 
+from phera.db.models import Connector
 from phera.modules.connectors.interfaces import MessagingProvider
+from phera.security.crypto import decrypt_secrets
 from phera.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -214,6 +216,20 @@ class GallaboxMessagingProvider(MessagingProvider):
             channel_id=settings.gallabox_channel_id,
         )
 
+    @classmethod
+    def from_connector(cls, connector: Connector) -> GallaboxMessagingProvider:
+        creds = connector.credentials or {}
+        secrets = (
+            decrypt_secrets(connector.secrets_encrypted) if connector.secrets_encrypted else {}
+        )
+        return cls(
+            api_key=secrets.get("api_key", ""),
+            api_secret=secrets.get("api_secret", ""),
+            endpoint=creds.get("endpoint") or "https://server.gallabox.com/devapi/messages/whatsapp",
+            account_id=creds.get("account_id", ""),
+            channel_id=creds.get("channel_id", ""),
+        )
+
     def configured(self) -> bool:
         return bool(self.api_key and self.api_secret and self.account_id and self.channel_id)
 
@@ -257,3 +273,17 @@ class GallaboxMessagingProvider(MessagingProvider):
             raise RuntimeError(f"Gallabox send failed ({response.status_code}): {response.text}")
         data = response.json() if response.content else {}
         return str(data.get("id") or data.get("messageId") or f"gallabox-{phone}")
+
+
+async def test_gallabox_credentials(credentials: dict, secrets: dict) -> dict:
+    """Field-presence check only — Gallabox has no confirmed safe read-only endpoint to ping."""
+    errors = []
+    if not secrets.get("api_key"):
+        errors.append("api_key is required")
+    if not secrets.get("api_secret"):
+        errors.append("api_secret is required")
+    if not credentials.get("account_id"):
+        errors.append("account_id is required")
+    if not credentials.get("channel_id"):
+        errors.append("channel_id is required")
+    return {"ok": not errors, "error": "; ".join(errors) or None}

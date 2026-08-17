@@ -4,16 +4,18 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from phera.api.deps import get_db, get_workspace
-from phera.db.models import Workspace
+from phera.db.models import Connector, Workspace
 from phera.modules.adapters.superhealth.webhooks import handle_service_event_completed
 from phera.modules.connectors.gallabox import parse_inbound as parse_gallabox
 from phera.modules.connectors.gallabox import verify_signature as verify_gallabox
 from phera.modules.connectors.google_group import parse_inbound as parse_email
 from phera.modules.connectors.google_group import verify_signature as verify_email
 from phera.modules.tickets.inbound import ingest_inbound_message
+from phera.security.crypto import decrypt_secrets
 from phera.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -34,8 +36,25 @@ async def inbound_webhook(
 
     if connector_id == "gallabox":
         signature = request.headers.get("x-gallabox-signature")
-        if not verify_gallabox(raw, signature, settings.gallabox_webhook_secret):
+        q = await session.execute(
+            select(Connector).where(
+                Connector.workspace_id == workspace.id,
+                Connector.type == "gallabox",
+                Connector.is_active.is_(True),
+            )
+        )
+        candidate_secrets = [
+            decrypt_secrets(c.secrets_encrypted).get("webhook_secret", "")
+            for c in q.scalars().all()
+            if c.secrets_encrypted
+        ]
+        non_empty = [s for s in candidate_secrets if s] or (
+            [settings.gallabox_webhook_secret] if settings.gallabox_webhook_secret else []
+        )
+        if non_empty and not any(verify_gallabox(raw, signature, s) for s in non_empty):
             raise HTTPException(401, "Invalid Gallabox signature")
+        # non_empty == [] means no Gallabox connector (DB or legacy env) has a secret
+        # configured anywhere — open, matching today's local-dev default.
     elif connector_id in ("google_group", "email"):
         signature = request.headers.get("x-email-signature") or request.headers.get(
             "x-webhook-secret"
