@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from phera.modules.connectors.exotel import ExotelTelephonyProvider, test_exotel_credentials
 from phera.modules.connectors.gallabox import (
     GallaboxMessagingProvider,
     test_gallabox_credentials,
@@ -23,7 +24,6 @@ from phera.modules.connectors.gallabox import (
 from phera.modules.connectors.gallabox import (
     verify_signature as gallabox_verify_signature,
 )
-from phera.modules.connectors.exotel import ExotelTelephonyProvider, test_exotel_credentials
 from phera.modules.connectors.imap_smtp import ImapSmtpEmailProvider, test_imap_smtp_credentials
 
 

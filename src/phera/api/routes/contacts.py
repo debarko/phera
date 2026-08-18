@@ -35,6 +35,7 @@ from phera.db.models import (
     Pipeline,
     PipelineTeam,
     Stage,
+    Team,
     User,
     Workspace,
 )
@@ -285,6 +286,20 @@ async def replace_pipeline_teams(
     if not pipeline or pipeline.workspace_id != workspace.id:
         raise HTTPException(404, "Pipeline not found")
 
+    requested_ids = set(body.team_ids)
+    if len(requested_ids) != len(body.team_ids):
+        raise HTTPException(422, "team_ids must not contain duplicates")
+
+    if requested_ids:
+        teams_q = await session.execute(
+            select(Team.id).where(
+                Team.workspace_id == workspace.id,
+                Team.id.in_(requested_ids),
+            )
+        )
+        if set(teams_q.scalars()) != requested_ids:
+            raise HTTPException(422, "One or more teams do not belong to this workspace")
+
     existing_q = await session.execute(
         select(PipelineTeam).where(PipelineTeam.pipeline_id == pipeline_id)
     )
@@ -397,6 +412,7 @@ async def create_deal(
     publish_inbox_event(
         {
             "type": "deal.created",
+            "workspace_id": str(workspace.id),
             "deal_id": str(deal.id),
             "pipeline_id": str(deal.pipeline_id),
             "stage_id": str(deal.stage_id),
@@ -455,6 +471,7 @@ async def move_deal_stage(
     publish_inbox_event(
         {
             "type": "deal.stage_changed",
+            "workspace_id": str(workspace.id),
             "deal_id": str(deal.id),
             "pipeline_id": str(deal.pipeline_id),
             "stage_from": str(old_stage),
@@ -500,6 +517,7 @@ async def assign_deal(
     publish_inbox_event(
         {
             "type": "deal.assigned",
+            "workspace_id": str(workspace.id),
             "deal_id": str(deal.id),
             "pipeline_id": str(deal.pipeline_id),
             "owner_user_id": deal.owner_user_id,

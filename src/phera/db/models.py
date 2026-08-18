@@ -404,7 +404,9 @@ class AgentTelephonyIdentity(Base, TimestampMixin):
     __tablename__ = "agent_telephony_identities"
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
     provider: Mapped[str] = mapped_column(String(32), default="exotel")
     sip_user: Mapped[str] = mapped_column(String(255), nullable=False)
     sip_secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
@@ -531,6 +533,7 @@ class Call(Base, TimestampMixin):
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
     contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id"))
     ticket_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tickets.id"))
+    agent_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     provider_call_id: Mapped[str | None] = mapped_column(String(255))
     direction: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -539,6 +542,14 @@ class Call(Base, TimestampMixin):
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     recording_url: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32), default="initiated")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "provider_call_id",
+            name="uq_calls_workspace_provider_call_id",
+        ),
+    )
 
 
 class Transcript(Base):

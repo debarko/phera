@@ -68,8 +68,10 @@ def create_app(*, run_worker: bool = False) -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(public.router)
-    app.include_router(hooks.router)
+    # Specific Exotel routes must be registered before the generic
+    # /hooks/{connector_id}/{channel} catch-all in hooks.router.
     app.include_router(voice_hooks.router)
+    app.include_router(hooks.router)
     app.include_router(contacts.router, prefix="/v1")
     app.include_router(forms.router, prefix="/v1")
     app.include_router(tickets.router, prefix="/v1")

@@ -21,3 +21,18 @@ async def test_publish_reaches_subscriber():
         assert "abc" in payload
     finally:
         unsubscribe_inbox(queue)
+
+
+def test_inbox_event_visible_scopes_by_workspace():
+    import json
+
+    from phera.api.routes.inbox import inbox_event_visible
+
+    ws = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    other = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    same = json.dumps({"type": "deal.created", "workspace_id": ws})
+    foreign = json.dumps({"type": "deal.created", "workspace_id": other})
+    assert inbox_event_visible(same, ws)
+    assert not inbox_event_visible(foreign, ws)
+    assert inbox_event_visible('{"type": "ticket.claimed"}', ws)
+    assert inbox_event_visible("not-json", ws)

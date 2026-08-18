@@ -25,7 +25,7 @@ def run_api(host: str | None = None, port: int | None = None, reload: bool = Fal
     uvicorn.run(
         "phera.main:app",
         host=host or settings.phera_host,
-        port=port or settings.phera_port,
+        port=settings.phera_port if port is None else port,
         reload=reload,
         factory=False,
     )
@@ -55,7 +55,7 @@ def run_all(host: str | None = None, port: int | None = None) -> None:
     uvicorn.run(
         create_app(run_worker=True),
         host=host or settings.phera_host,
-        port=port or settings.phera_port,
+        port=settings.phera_port if port is None else port,
         reload=False,
     )
 

@@ -57,8 +57,13 @@ class SipCredentialsOut(BaseModel):
     display_name: str | None = None
 
 
-async def _identity_out(session: AsyncSession, identity: AgentTelephonyIdentity) -> AgentTelephonyIdentityOut:
-    user = await session.get(User, identity.user_id)
+async def _identity_out(
+    session: AsyncSession,
+    identity: AgentTelephonyIdentity,
+    user: User | None = None,
+) -> AgentTelephonyIdentityOut:
+    if user is None:
+        user = await session.get(User, identity.user_id)
     return AgentTelephonyIdentityOut(
         user_id=identity.user_id,
         user_email=user.email if user else None,
@@ -79,11 +84,11 @@ async def list_agent_identities(
 ):
     _require_manage(actor)
     q = await session.execute(
-        select(AgentTelephonyIdentity).where(
-            AgentTelephonyIdentity.workspace_id == workspace.id
-        )
+        select(AgentTelephonyIdentity, User)
+        .outerjoin(User, User.id == AgentTelephonyIdentity.user_id)
+        .where(AgentTelephonyIdentity.workspace_id == workspace.id)
     )
-    return [await _identity_out(session, identity) for identity in q.scalars().all()]
+    return [await _identity_out(session, identity, user) for identity, user in q.all()]
 
 
 @router.post("/telephony/agents", response_model=AgentTelephonyIdentityOut, status_code=201)
@@ -102,6 +107,8 @@ async def upsert_agent_identity(
     if identity is None:
         identity = AgentTelephonyIdentity(user_id=body.user_id, workspace_id=workspace.id)
         session.add(identity)
+    elif identity.workspace_id != workspace.id:
+        raise HTTPException(409, "Agent telephony identity belongs to another workspace")
     identity.provider = body.provider
     identity.sip_user = body.sip_user
     identity.sip_secret_encrypted = encrypt_secrets({"secret": body.sip_secret})

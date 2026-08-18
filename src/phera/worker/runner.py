@@ -28,7 +28,6 @@ from phera.settings import get_settings
 logger = logging.getLogger(__name__)
 
 
-
 async def dispatch_outbox_batch(session: AsyncSession, limit: int = 50) -> int:
     result = await session.execute(
         text(
@@ -100,8 +99,12 @@ async def process_lifecycle(session: AsyncSession, event: OutboxEvent) -> None:
     for dest in q.scalars().all():
         filt = dest.event_filter or {}
         types = filt.get("event_types") or []
-        if types and event.event_type not in types and not any(
-            event.event_type.startswith(t.rstrip("*")) for t in types if t.endswith("*")
+        if (
+            types
+            and event.event_type not in types
+            and not any(
+                event.event_type.startswith(t.rstrip("*")) for t in types if t.endswith("*")
+            )
         ):
             continue
         provider = MoEngageLifecycleProvider("app", "key")
@@ -111,10 +114,12 @@ async def process_lifecycle(session: AsyncSession, event: OutboxEvent) -> None:
 async def process_delayed_wakes(session: AsyncSession) -> int:
     now = datetime.now(UTC)
     q = await session.execute(
-        select(WorkflowRun).where(
+        select(WorkflowRun)
+        .where(
             WorkflowRun.status == "waiting",
             WorkflowRun.wake_at <= now,
-        ).limit(20)
+        )
+        .limit(20)
     )
     runs = q.scalars().all()
     for run in runs:
@@ -219,6 +224,7 @@ async def run_worker_loop() -> None:
                 if (
                     "workflow" in settings.worker_queue_list
                     or "lifecycle" in settings.worker_queue_list
+                    or "maintenance" in settings.worker_queue_list
                 ):
                     await dispatch_outbox_batch(session)
 

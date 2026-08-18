@@ -15,8 +15,11 @@ async def _select_available_agent(
     stmt = select(AgentPresence).where(AgentPresence.status == "available")
     if exclude_on_voice_call:
         stmt = stmt.where(AgentPresence.on_voice_call.is_(False))
-    agents = (await session.execute(stmt.limit(10))).scalars().all()
-    return agents[0] if agents else None
+    stmt = stmt.order_by(
+        AgentPresence.last_assigned_at.asc().nulls_first(),
+        AgentPresence.user_id,
+    ).limit(1)
+    return (await session.execute(stmt)).scalars().first()
 
 
 async def route_unassigned_ticket(
@@ -53,12 +56,17 @@ async def select_agent_for_voice(
     step like `route_unassigned_ticket`, since the call is already ringing by the time
     Exotel's routing webhook calls this."""
     exclude_on_voice_call = bool(policy and policy.focus_on_voice)
-    return await _select_available_agent(session, exclude_on_voice_call=exclude_on_voice_call)
+    agent = await _select_available_agent(session, exclude_on_voice_call=exclude_on_voice_call)
+    if agent:
+        agent.last_assigned_at = datetime.now(UTC)
+    return agent
 
 
 async def agent_open_load(session: AsyncSession, user_id: str) -> int:
     q = await session.execute(
-        select(func.count()).select_from(Ticket).where(
+        select(func.count())
+        .select_from(Ticket)
+        .where(
             Ticket.assignee_user_id == user_id,
             Ticket.status.in_(["open", "pending"]),
         )

@@ -16,7 +16,15 @@ from phera.security.crypto import decrypt_secrets
 
 
 class ExotelTelephonyProvider(TelephonyProvider):
-    def __init__(self, *, account_sid: str, subdomain: str, sip_domain: str, api_key: str, api_token: str):
+    def __init__(
+        self,
+        *,
+        account_sid: str,
+        subdomain: str,
+        sip_domain: str,
+        api_key: str,
+        api_token: str,
+    ):
         self.account_sid = account_sid
         self.subdomain = subdomain
         self.sip_domain = sip_domain
@@ -38,7 +46,13 @@ class ExotelTelephonyProvider(TelephonyProvider):
         )
 
     def configured(self) -> bool:
-        return bool(self.account_sid and self.subdomain and self.api_key and self.api_token)
+        return bool(
+            self.account_sid
+            and self.subdomain
+            and self.sip_domain
+            and self.api_key
+            and self.api_token
+        )
 
     async def click_to_call(self, from_user: str, to_number: str, **kwargs: Any) -> dict:
         raise NotImplementedError(

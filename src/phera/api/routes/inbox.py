@@ -10,7 +10,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from phera.api.deps import DEFAULT_WORKSPACE_SLUG, get_actor, get_authenticated_actor, get_db, get_workspace
+from phera.api.deps import (
+    DEFAULT_WORKSPACE_SLUG,
+    get_actor,
+    get_authenticated_actor,
+    get_db,
+    get_workspace,
+)
 from phera.api.schemas import PresenceOut, PresenceUpdate, TicketDetailOut
 from phera.authz.actor import Actor
 from phera.authz.service import ensure_user_stub
@@ -49,6 +55,15 @@ def _apply_inbox_order(q, bucket: str):
 
 def _publish_inbox_event(payload: dict) -> None:
     publish_inbox_event(payload)
+
+
+def inbox_event_visible(payload: str, workspace_id: str) -> bool:
+    try:
+        event = json.loads(payload)
+    except json.JSONDecodeError:
+        return True
+    event_ws = event.get("workspace_id")
+    return event_ws is None or str(event_ws) == workspace_id
 
 
 @router.get("/inbox/tickets", response_model=list[TicketDetailOut])
@@ -154,9 +169,12 @@ async def inbox_stream(
         q = await session.execute(select(Workspace).where(Workspace.slug == DEFAULT_WORKSPACE_SLUG))
         workspace = q.scalar_one_or_none()
         if not workspace:
-            raise HTTPException(status_code=503, detail="Workspace not initialized — run migrations/seed")
+            raise HTTPException(
+                status_code=503, detail="Workspace not initialized — run migrations/seed"
+            )
         await ensure_user_stub(session, actor, workspace.id)
 
+    workspace_id = str(workspace.id)
     queue = subscribe_inbox()
 
     async def event_generator():
@@ -167,6 +185,8 @@ async def inbox_stream(
                     break
                 try:
                     payload = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    if not inbox_event_visible(payload, workspace_id):
+                        continue
                     yield f"data: {payload}\n\n"
                 except TimeoutError:
                     yield ": keepalive\n\n"

@@ -30,6 +30,25 @@ SHORT_ID_IN_SUBJECT = re.compile(r"\[#(\d{6}-\d{4,6})\]")
 logger = logging.getLogger(__name__)
 
 
+def normalize_channel_address(value: str | None) -> str:
+    """Strip separators so Exotel E.164 payloads match stored channel addresses."""
+    if not value:
+        return ""
+    return re.sub(r"[^\d+]", "", value.strip())
+
+
+def _address_matches(account: ChannelAccount, address_hint: str) -> bool:
+    if not account.address:
+        return False
+    hint = address_hint.lower().replace(" ", "")
+    stored = account.address.lower().replace(" ", "")
+    if hint and hint in stored:
+        return True
+    phone_hint = normalize_channel_address(address_hint).lower()
+    phone_stored = normalize_channel_address(account.address).lower()
+    return bool(phone_hint) and phone_hint in phone_stored
+
+
 async def resolve_channel_account(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -46,13 +65,54 @@ async def resolve_channel_account(
             ChannelAccount.is_active.is_(True),
         )
     )
-    accounts = list(q.scalars().all())
+    return _pick_channel_account(
+        list(q.scalars().all()), kind=kind, adapter_type=adapter_type, address_hint=address_hint
+    )
+
+
+async def resolve_channel_account_global(
+    session: AsyncSession,
+    *,
+    kind: str,
+    adapter_type: str,
+    address_hint: str,
+) -> ChannelAccount | None:
+    """Resolve an active channel by address across workspaces. Requires an address
+    hint — never falls back to "the only voice channel" globally."""
+    q = await session.execute(
+        select(ChannelAccount).where(
+            ChannelAccount.kind == kind,
+            ChannelAccount.adapter_type == adapter_type,
+            ChannelAccount.is_active.is_(True),
+        )
+    )
+    accounts = [account for account in q.scalars().all() if _address_matches(account, address_hint)]
+    if len(accounts) == 1:
+        return accounts[0]
+    if len(accounts) > 1:
+        logger.warning(
+            "Ambiguous global channel_account match kind=%s adapter_type=%s hint=%r — "
+            "%d matches — rejecting",
+            kind,
+            adapter_type,
+            address_hint,
+            len(accounts),
+        )
+    return None
+
+
+def _pick_channel_account(
+    accounts: list[ChannelAccount],
+    *,
+    kind: str,
+    adapter_type: str,
+    address_hint: str | None,
+) -> ChannelAccount | None:
     if not accounts:
         return None
     if address_hint:
-        hint = address_hint.lower().replace(" ", "")
         for account in accounts:
-            if account.address and hint in account.address.lower().replace(" ", ""):
+            if _address_matches(account, address_hint):
                 return account
     if len(accounts) == 1:
         return accounts[0]
@@ -128,9 +188,7 @@ async def _reuse_or_create_ticket(
     thread = inbound.get("thread_keys") or {}
     in_reply_to = thread.get("in_reply_to")
     if in_reply_to:
-        q = await session.execute(
-            select(Message).where(Message.provider_message_id == in_reply_to)
-        )
+        q = await session.execute(select(Message).where(Message.provider_message_id == in_reply_to))
         prior = q.scalar_one_or_none()
         if prior and prior.ticket_id:
             ticket = await session.get(Ticket, prior.ticket_id)
@@ -243,10 +301,11 @@ async def resolve_call_ticket(
     if not channel:
         raise ValueError(f"No active {adapter_type} voice channel account")
 
-    contact = await _find_or_create_contact(session, workspace.id, {"contact_phone": from_number})
+    inbound = {"contact_phone": from_number, "adapter_type": adapter_type}
+    contact = await _find_or_create_contact(session, workspace.id, inbound)
     policy = await load_reuse_policy(session, workspace.id, channel.kind)
     ticket, created = await _reuse_or_create_ticket(
-        session, workspace.id, contact, channel, {"contact_phone": from_number}, policy
+        session, workspace.id, contact, channel, inbound, policy
     )
     if ticket.status in ("resolved", "closed"):
         ticket.status = "open"

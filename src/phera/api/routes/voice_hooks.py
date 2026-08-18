@@ -19,6 +19,7 @@ shape that was previously found and fixed in the Gallabox webhook.
 from __future__ import annotations
 
 import logging
+import secrets as secrets_module
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -26,15 +27,25 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from phera.api.deps import get_db, get_workspace
-from phera.db.commit import commit_and_notify
-from phera.db.models import AgentPresence, AgentTelephonyIdentity, Call, Connector, RoutingPolicy, Ticket, Workspace
+from phera.api.deps import get_db
+from phera.db.commit import commit_and_notify, track_outbox_notify
+from phera.db.models import (
+    AgentPresence,
+    AgentTelephonyIdentity,
+    Call,
+    ChannelAccount,
+    Connector,
+    OutboxEvent,
+    RoutingPolicy,
+    Ticket,
+    Workspace,
+)
 from phera.modules.routing.engine import select_agent_for_voice
-from phera.modules.tickets.inbound import resolve_call_ticket, resolve_channel_account
+from phera.modules.tickets.inbound import resolve_call_ticket, resolve_channel_account_global
 from phera.modules.tickets.inbox_events import publish_inbox_event
-from phera.modules.transcription.job import transcribe_call
 from phera.security.crypto import decrypt_secrets
 
 logger = logging.getLogger(__name__)
@@ -65,7 +76,10 @@ async def _request_params(request: Request) -> dict[str, str]:
     params = dict(request.query_params)
     if request.method == "POST":
         content_type = request.headers.get("content-type", "")
-        if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        if (
+            "application/x-www-form-urlencoded" in content_type
+            or "multipart/form-data" in content_type
+        ):
             form = await request.form()
             params.update({k: str(v) for k, v in form.items()})
     return params
@@ -81,8 +95,27 @@ async def _verify_bound_token(
         connector = await session.get(Connector, channel_connector_id)
         if connector and connector.secrets_encrypted:
             bound_token = decrypt_secrets(connector.secrets_encrypted).get("webhook_token", "")
-    if not bound_token or token != bound_token:
+    try:
+        token_ok = bool(bound_token) and secrets_module.compare_digest(token, bound_token)
+    except (TypeError, ValueError):
+        token_ok = False
+    if not token_ok:
         raise HTTPException(401, "Invalid webhook token")
+
+
+async def _resolve_verified_exotel_channel(
+    session: AsyncSession, token: str, to_number: str
+) -> tuple[Workspace, ChannelAccount]:
+    channel = await resolve_channel_account_global(
+        session, kind="voice", adapter_type="exotel", address_hint=to_number
+    )
+    await _verify_bound_token(session, channel.connector_id if channel else None, token)
+    if not channel:
+        raise HTTPException(401, "Invalid webhook token")
+    workspace = await session.get(Workspace, channel.workspace_id)
+    if not workspace:
+        raise HTTPException(401, "Invalid webhook token")
+    return workspace, channel
 
 
 def _lifecycle_event_type(call_status: str | None) -> str:
@@ -96,6 +129,81 @@ def _lifecycle_event_type(call_status: str | None) -> str:
     return "call.updated"
 
 
+async def _get_or_create_inbound_call(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    ticket_id: uuid.UUID,
+    agent_user_id: str,
+    call_sid: str,
+    from_number: str,
+    to_number: str,
+) -> Call:
+    q = await session.execute(
+        select(Call).where(Call.workspace_id == workspace_id, Call.provider_call_id == call_sid)
+    )
+    existing = q.scalar_one_or_none()
+    if existing:
+        if not existing.agent_user_id:
+            existing.agent_user_id = agent_user_id
+        return existing
+
+    call = Call(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        contact_id=contact_id,
+        ticket_id=ticket_id,
+        agent_user_id=agent_user_id,
+        provider="exotel",
+        provider_call_id=call_sid,
+        direction="inbound",
+        from_number=from_number,
+        to_number=to_number,
+        status="routing",
+    )
+    try:
+        async with session.begin_nested():
+            session.add(call)
+            await session.flush()
+        return call
+    except IntegrityError:
+        q = await session.execute(
+            select(Call).where(Call.workspace_id == workspace_id, Call.provider_call_id == call_sid)
+        )
+        raced = q.scalar_one_or_none()
+        if raced is None:
+            raise
+        return raced
+
+
+async def _enqueue_call_ended(session: AsyncSession, call: Call) -> None:
+    key = f"call.ended:{call.id}"
+    existing_q = await session.execute(
+        select(OutboxEvent.id).where(OutboxEvent.idempotency_key == key)
+    )
+    if existing_q.scalar_one_or_none() is not None:
+        return
+    outbox = OutboxEvent(
+        id=uuid.uuid4(),
+        occurred_at=datetime.now(UTC),
+        workspace_id=call.workspace_id,
+        event_type="call.ended",
+        entity_type="call",
+        entity_id=call.id,
+        idempotency_key=key,
+        payload={"call_id": str(call.id)},
+        status="pending",
+    )
+    try:
+        async with session.begin_nested():
+            session.add(outbox)
+            await session.flush()
+        track_outbox_notify(session, outbox.id)
+    except IntegrityError:
+        return
+
+
 @router.get(
     "/hooks/exotel/route", response_class=PlainTextResponse, operation_id="exotel_route_call_get"
 )
@@ -106,7 +214,6 @@ async def exotel_route_call(
     request: Request,
     token: str,
     session: AsyncSession = Depends(get_db),
-    workspace: Workspace = Depends(get_workspace),
 ) -> PlainTextResponse:
     params = await _request_params(request)
     from_number = _first(params.get("From"), params.get("CallFrom"), params.get("from"))
@@ -114,13 +221,10 @@ async def exotel_route_call(
     call_sid = _first(params.get("CallSid"), params.get("CallSID"), params.get("call_sid"))
     if not from_number or not to_number:
         raise HTTPException(400, "Missing From/To in routing webhook payload")
+    if not call_sid:
+        raise HTTPException(400, "Missing CallSid in routing webhook payload")
 
-    channel = await resolve_channel_account(
-        session, workspace.id, kind="voice", adapter_type="exotel", address_hint=to_number
-    )
-    if not channel:
-        raise HTTPException(404, "No active Exotel voice channel for this exophone")
-    await _verify_bound_token(session, channel.connector_id, token)
+    workspace, channel = await _resolve_verified_exotel_channel(session, token, to_number)
 
     _, contact, ticket, created = await resolve_call_ticket(
         session,
@@ -151,30 +255,28 @@ async def exotel_route_call(
         return PlainTextResponse("")
 
     identity = await session.get(AgentTelephonyIdentity, target_user_id)
-    if not identity or not identity.is_active:
+    if not identity or not identity.is_active or identity.workspace_id != workspace.id:
         await commit_and_notify(session)
         logger.warning("Assigned agent %s has no active voice identity", target_user_id)
         return PlainTextResponse("")
 
-    call = Call(
-        id=uuid.uuid4(),
+    call = await _get_or_create_inbound_call(
+        session,
         workspace_id=workspace.id,
         contact_id=contact.id,
         ticket_id=ticket.id,
-        provider="exotel",
-        provider_call_id=call_sid,
-        direction="inbound",
+        agent_user_id=target_user_id,
+        call_sid=call_sid,
         from_number=from_number,
         to_number=to_number,
-        status="routing",
     )
-    session.add(call)
     await commit_and_notify(session)
     await session.refresh(call)
 
     publish_inbox_event(
         {
             "type": "call.assigned",
+            "workspace_id": str(workspace.id),
             "ticket_id": str(ticket.id),
             "call_id": str(call.id),
             "provider_call_id": call_sid,
@@ -193,12 +295,16 @@ async def exotel_call_event(
     request: Request,
     token: str,
     session: AsyncSession = Depends(get_db),
-    workspace: Workspace = Depends(get_workspace),
 ) -> dict:
     params = await _request_params(request)
     call_sid = _first(params.get("CallSid"), params.get("CallSID"), params.get("call_sid"))
+    to_number = _first(params.get("To"), params.get("CallTo"), params.get("to"))
     if not call_sid:
         raise HTTPException(400, "Missing CallSid in call-event webhook payload")
+    if not to_number:
+        raise HTTPException(401, "Invalid webhook token")
+
+    workspace, _channel = await _resolve_verified_exotel_channel(session, token, to_number)
 
     q = await session.execute(
         select(Call).where(Call.workspace_id == workspace.id, Call.provider_call_id == call_sid)
@@ -207,12 +313,9 @@ async def exotel_call_event(
     if not call:
         raise HTTPException(404, "Unknown call_sid — was the routing webhook called first?")
 
-    channel = await resolve_channel_account(
-        session, workspace.id, kind="voice", adapter_type="exotel", address_hint=call.to_number
+    call_status = _first(
+        params.get("CallStatus"), params.get("DialCallStatus"), params.get("Status")
     )
-    await _verify_bound_token(session, channel.connector_id if channel else None, token)
-
-    call_status = _first(params.get("CallStatus"), params.get("DialCallStatus"), params.get("Status"))
     duration = _first(
         params.get("DialCallDuration"), params.get("Duration"), params.get("CallDuration")
     )
@@ -230,10 +333,14 @@ async def exotel_call_event(
         call.recording_url = recording_url
 
     ticket = await session.get(Ticket, call.ticket_id) if call.ticket_id else None
-    if ticket and ticket.assignee_user_id and event_type in ("call.answered", "call.ended"):
-        presence = await session.get(AgentPresence, ticket.assignee_user_id)
+    agent_user_id = call.agent_user_id or (ticket.assignee_user_id if ticket else None)
+    if agent_user_id and event_type in ("call.answered", "call.ended"):
+        presence = await session.get(AgentPresence, agent_user_id)
         if presence:
             presence.on_voice_call = event_type == "call.answered"
+
+    if event_type == "call.ended" and call.recording_url:
+        await _enqueue_call_ended(session, call)
 
     await commit_and_notify(session)
 
@@ -241,19 +348,13 @@ async def exotel_call_event(
         publish_inbox_event(
             {
                 "type": event_type,
+                "workspace_id": str(workspace.id),
                 "ticket_id": str(call.ticket_id),
                 "call_id": str(call.id),
                 "provider_call_id": call.provider_call_id,
-                "assignee_user_id": ticket.assignee_user_id if ticket else None,
+                "assignee_user_id": agent_user_id,
                 "status": call.status,
             }
         )
-
-    if event_type == "call.ended" and call.recording_url:
-        try:
-            await transcribe_call(session, call.id)
-            await commit_and_notify(session)
-        except Exception:
-            logger.exception("Failed to transcribe call %s", call.id)
 
     return {"received": True, "call_id": str(call.id), "event": event_type}
