@@ -187,6 +187,8 @@ async def _reuse_or_create_ticket(
         )
         if preview:
             subject_text = preview
+        elif channel.kind == "voice":
+            subject_text = f"Call from {who}"
         elif channel.kind == "messaging":
             subject_text = f"WhatsApp from {who}"
         else:
@@ -221,6 +223,40 @@ async def _apply_reopen_assignee(
     agents = support_agent_ids(dict(profile.flags or {}) if profile else {})
     if agents and ticket.assignee_user_id not in agents:
         ticket.assignee_user_id = None
+
+
+async def resolve_call_ticket(
+    session: AsyncSession,
+    workspace: Workspace,
+    *,
+    adapter_type: str,
+    from_number: str,
+    to_number: str | None,
+) -> tuple[ChannelAccount, Contact, Ticket, bool]:
+    """Resolve the channel/contact/ticket for an inbound call, without committing —
+    the caller (voice_hooks.py) still needs to decide the target agent and create the
+    `Call` row in the same transaction. Mirrors `ingest_inbound_message`'s resolution
+    steps but produces no `Message` row (a call is not a message)."""
+    channel = await resolve_channel_account(
+        session, workspace.id, kind="voice", adapter_type=adapter_type, address_hint=to_number
+    )
+    if not channel:
+        raise ValueError(f"No active {adapter_type} voice channel account")
+
+    contact = await _find_or_create_contact(session, workspace.id, {"contact_phone": from_number})
+    policy = await load_reuse_policy(session, workspace.id, channel.kind)
+    ticket, created = await _reuse_or_create_ticket(
+        session, workspace.id, contact, channel, {"contact_phone": from_number}, policy
+    )
+    if ticket.status in ("resolved", "closed"):
+        ticket.status = "open"
+        ticket.resolved_at = None
+        ticket.closed_at = None
+        ticket.status_entered_at = datetime.now(UTC)
+        await _apply_reopen_assignee(session, workspace.id, ticket, policy)
+
+    touch_ticket_activity(ticket)
+    return channel, contact, ticket, created
 
 
 async def ingest_inbound_message(

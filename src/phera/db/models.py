@@ -389,6 +389,22 @@ class AgentPresence(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AgentTelephonyIdentity(Base, TimestampMixin):
+    """Per-agent SIP credentials for the WebRTC softphone (e.g. Exotel). MVP provisioning
+    is manual — an admin copies these out of the vendor's own dashboard."""
+
+    __tablename__ = "agent_telephony_identities"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), default="exotel")
+    sip_user: Mapped[str] = mapped_column(String(255), nullable=False)
+    sip_secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    sip_domain: Mapped[str] = mapped_column(String(255), nullable=False)
+    sip_port: Mapped[int] = mapped_column(Integer, default=443)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class TicketOffer(Base):
     __tablename__ = "ticket_offers"
 

@@ -21,7 +21,9 @@ from phera.api.routes import (
     public,
     routing_settings,
     support_settings,
+    telephony,
     tickets,
+    voice_hooks,
     workflows,
 )
 from phera.observability.otel import instrument_fastapi
@@ -66,6 +68,7 @@ def create_app(*, run_worker: bool = False) -> FastAPI:
     app.include_router(health.router)
     app.include_router(public.router)
     app.include_router(hooks.router)
+    app.include_router(voice_hooks.router)
     app.include_router(contacts.router, prefix="/v1")
     app.include_router(forms.router, prefix="/v1")
     app.include_router(tickets.router, prefix="/v1")
@@ -78,6 +81,7 @@ def create_app(*, run_worker: bool = False) -> FastAPI:
     app.include_router(channels.router, prefix="/v1")
     app.include_router(connectors.router, prefix="/v1")
     app.include_router(calls.router, prefix="/v1")
+    app.include_router(telephony.router, prefix="/v1")
     app.include_router(broadcasts.router, prefix="/v1")
 
     instrument_fastapi(app)

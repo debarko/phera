@@ -9,6 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from phera.db.models import AgentPresence, RoutingPolicy, RoutingTier, Ticket, TicketOffer
 
 
+async def _select_available_agent(
+    session: AsyncSession, *, exclude_on_voice_call: bool = False
+) -> AgentPresence | None:
+    stmt = select(AgentPresence).where(AgentPresence.status == "available")
+    if exclude_on_voice_call:
+        stmt = stmt.where(AgentPresence.on_voice_call.is_(False))
+    agents = (await session.execute(stmt.limit(10))).scalars().all()
+    return agents[0] if agents else None
+
+
 async def route_unassigned_ticket(
     session: AsyncSession,
     ticket: Ticket,
@@ -21,14 +31,10 @@ async def route_unassigned_ticket(
     if not tier or not tier.team_id:
         return None
 
-    agents_q = await session.execute(
-        select(AgentPresence).where(AgentPresence.status == "available").limit(10)
-    )
-    agents = agents_q.scalars().all()
-    if not agents:
+    agent = await _select_available_agent(session, exclude_on_voice_call=policy.focus_on_voice)
+    if not agent:
         return None
 
-    agent = agents[0]
     offer = TicketOffer(
         id=uuid.uuid4(),
         ticket_id=ticket.id,
@@ -38,6 +44,16 @@ async def route_unassigned_ticket(
     )
     session.add(offer)
     return offer
+
+
+async def select_agent_for_voice(
+    session: AsyncSession, policy: RoutingPolicy | None
+) -> AgentPresence | None:
+    """Pick an agent to ring for an inbound call — direct assignment, not an offer/claim
+    step like `route_unassigned_ticket`, since the call is already ringing by the time
+    Exotel's routing webhook calls this."""
+    exclude_on_voice_call = bool(policy and policy.focus_on_voice)
+    return await _select_available_agent(session, exclude_on_voice_call=exclude_on_voice_call)
 
 
 async def agent_open_load(session: AsyncSession, user_id: str) -> int:
