@@ -18,10 +18,17 @@ def _configure_logging() -> None:
 
 
 @app.command("api")
-def run_api(host: str = "0.0.0.0", port: int = 8000, reload: bool = False) -> None:
+def run_api(host: str | None = None, port: int | None = None, reload: bool = False) -> None:
     """Run HTTP API only."""
     _configure_logging()
-    uvicorn.run("phera.main:app", host=host, port=port, reload=reload, factory=False)
+    settings = get_settings()
+    uvicorn.run(
+        "phera.main:app",
+        host=host or settings.phera_host,
+        port=port or settings.phera_port,
+        reload=reload,
+        factory=False,
+    )
 
 
 @app.command("worker")
@@ -41,10 +48,16 @@ def run_worker() -> None:
 
 
 @app.command("all")
-def run_all(host: str = "0.0.0.0", port: int = 8000) -> None:
+def run_all(host: str | None = None, port: int | None = None) -> None:
     """Run API + worker in one process (local dev)."""
     _configure_logging()
-    uvicorn.run(create_app(run_worker=True), host=host, port=port, reload=False)
+    settings = get_settings()
+    uvicorn.run(
+        create_app(run_worker=True),
+        host=host or settings.phera_host,
+        port=port or settings.phera_port,
+        reload=False,
+    )
 
 
 if __name__ == "__main__":

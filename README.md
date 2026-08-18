@@ -146,8 +146,8 @@ alembic upgrade head
 phera all
 ```
 
-API: http://localhost:8000/docs
-Health: http://localhost:8000/health
+API: http://localhost:8010/docs
+Health: http://localhost:8010/health
 
 ## Process roles
 

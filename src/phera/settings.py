@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     deployment_environment: str = "development"
 
     phera_role: PheraRole = "all"
+    phera_host: str = "0.0.0.0"
+    phera_port: int = 8010
     phera_db_slow_ms: int = 200
     worker_queues: str = "workflow,delayed,lifecycle,communication,maintenance"
 
