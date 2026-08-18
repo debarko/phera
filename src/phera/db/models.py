@@ -546,6 +546,7 @@ class Call(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint(
             "workspace_id",
+            "provider",
             "provider_call_id",
             name="uq_calls_workspace_provider_call_id",
         ),

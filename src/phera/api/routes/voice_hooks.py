@@ -141,7 +141,11 @@ async def _get_or_create_inbound_call(
     to_number: str,
 ) -> Call:
     q = await session.execute(
-        select(Call).where(Call.workspace_id == workspace_id, Call.provider_call_id == call_sid)
+        select(Call).where(
+            Call.workspace_id == workspace_id,
+            Call.provider == "exotel",
+            Call.provider_call_id == call_sid,
+        )
     )
     existing = q.scalar_one_or_none()
     if existing:
@@ -169,7 +173,11 @@ async def _get_or_create_inbound_call(
         return call
     except IntegrityError:
         q = await session.execute(
-            select(Call).where(Call.workspace_id == workspace_id, Call.provider_call_id == call_sid)
+            select(Call).where(
+                Call.workspace_id == workspace_id,
+                Call.provider == "exotel",
+                Call.provider_call_id == call_sid,
+            )
         )
         raced = q.scalar_one_or_none()
         if raced is None:
@@ -241,7 +249,7 @@ async def exotel_route_call(
             if channel.routing_policy_id
             else None
         )
-        agent = await select_agent_for_voice(session, policy)
+        agent = await select_agent_for_voice(session, policy, workspace.id)
         if agent:
             target_user_id = agent.user_id
             ticket.assignee_user_id = target_user_id
@@ -307,7 +315,11 @@ async def exotel_call_event(
     workspace, _channel = await _resolve_verified_exotel_channel(session, token, to_number)
 
     q = await session.execute(
-        select(Call).where(Call.workspace_id == workspace.id, Call.provider_call_id == call_sid)
+        select(Call).where(
+            Call.workspace_id == workspace.id,
+            Call.provider == "exotel",
+            Call.provider_call_id == call_sid,
+        )
     )
     call = q.scalar_one_or_none()
     if not call:

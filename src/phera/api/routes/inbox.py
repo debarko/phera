@@ -61,9 +61,11 @@ def inbox_event_visible(payload: str, workspace_id: str) -> bool:
     try:
         event = json.loads(payload)
     except json.JSONDecodeError:
-        return True
+        return False
+    if not isinstance(event, dict):
+        return False
     event_ws = event.get("workspace_id")
-    return event_ws is None or str(event_ws) == workspace_id
+    return event_ws is not None and str(event_ws) == workspace_id
 
 
 @router.get("/inbox/tickets", response_model=list[TicketDetailOut])
@@ -119,7 +121,12 @@ async def claim_ticket(
     await commit_and_notify(session)
     await session.refresh(ticket)
     _publish_inbox_event(
-        {"type": "ticket.claimed", "ticket_id": str(ticket.id), "actor_id": actor.id}
+        {
+            "type": "ticket.claimed",
+            "workspace_id": str(workspace.id),
+            "ticket_id": str(ticket.id),
+            "actor_id": actor.id,
+        }
     )
     return await ticket_detail_dict(session, ticket)
 
@@ -139,6 +146,7 @@ async def get_presence(
 async def update_presence(
     body: PresenceUpdate,
     session: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
     actor: Actor = Depends(get_authenticated_actor),
 ):
     q = await session.execute(select(AgentPresence).where(AgentPresence.user_id == actor.id))
@@ -150,7 +158,14 @@ async def update_presence(
         presence.status = body.status
         presence.updated_at = datetime.now(UTC)
     await commit_and_notify(session)
-    _publish_inbox_event({"type": "presence.updated", "user_id": actor.id, "status": body.status})
+    _publish_inbox_event(
+        {
+            "type": "presence.updated",
+            "workspace_id": str(workspace.id),
+            "user_id": actor.id,
+            "status": body.status,
+        }
+    )
     return {"user_id": actor.id, "status": body.status}
 
 

@@ -413,6 +413,7 @@ async def ingest_inbound_message(
     publish_inbox_event(
         {
             "type": "message.received",
+            "workspace_id": str(workspace.id),
             "ticket_id": result["ticket_id"],
             "created_ticket": created,
             "contact_id": result["contact_id"],

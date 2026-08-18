@@ -119,6 +119,7 @@ async def create_ticket(
     publish_inbox_event(
         {
             "type": "ticket.created",
+            "workspace_id": str(workspace.id),
             "ticket_id": str(ticket.id),
             "created_ticket": True,
             "assignee_user_id": ticket.assignee_user_id,
@@ -477,6 +478,7 @@ async def send_ticket_message(
     publish_inbox_event(
         {
             "type": "message.sent",
+            "workspace_id": str(workspace.id),
             "ticket_id": str(ticket.id),
             "channel_kind": channel.kind,
             "assignee_user_id": ticket.assignee_user_id,
@@ -485,7 +487,12 @@ async def send_ticket_message(
     )
     if claimed:
         publish_inbox_event(
-            {"type": "ticket.claimed", "ticket_id": str(ticket.id), "actor_id": actor.id}
+            {
+                "type": "ticket.claimed",
+                "workspace_id": str(workspace.id),
+                "ticket_id": str(ticket.id),
+                "actor_id": actor.id,
+            }
         )
     return MessageOut(
         id=message.id,

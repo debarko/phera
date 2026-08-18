@@ -5,8 +5,9 @@ Revises: 006
 Create Date: 2026-08-18
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "007"
 down_revision = "006"
@@ -25,6 +26,7 @@ def upgrade() -> None:
         USING calls b
         WHERE a.provider_call_id IS NOT NULL
           AND a.workspace_id = b.workspace_id
+          AND a.provider = b.provider
           AND a.provider_call_id = b.provider_call_id
           AND a.id > b.id
         """
@@ -32,7 +34,7 @@ def upgrade() -> None:
     op.create_unique_constraint(
         "uq_calls_workspace_provider_call_id",
         "calls",
-        ["workspace_id", "provider_call_id"],
+        ["workspace_id", "provider", "provider_call_id"],
     )
     op.create_index(
         "ix_agent_telephony_identities_workspace_id",

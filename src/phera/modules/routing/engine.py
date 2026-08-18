@@ -6,7 +6,14 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from phera.db.models import AgentPresence, RoutingPolicy, RoutingTier, Ticket, TicketOffer
+from phera.db.models import (
+    AgentPresence,
+    AgentTelephonyIdentity,
+    RoutingPolicy,
+    RoutingTier,
+    Ticket,
+    TicketOffer,
+)
 
 
 async def _select_available_agent(
@@ -50,13 +57,28 @@ async def route_unassigned_ticket(
 
 
 async def select_agent_for_voice(
-    session: AsyncSession, policy: RoutingPolicy | None
+    session: AsyncSession, policy: RoutingPolicy | None, workspace_id: uuid.UUID
 ) -> AgentPresence | None:
     """Pick an agent to ring for an inbound call — direct assignment, not an offer/claim
     step like `route_unassigned_ticket`, since the call is already ringing by the time
     Exotel's routing webhook calls this."""
     exclude_on_voice_call = bool(policy and policy.focus_on_voice)
-    agent = await _select_available_agent(session, exclude_on_voice_call=exclude_on_voice_call)
+    stmt = (
+        select(AgentPresence)
+        .join(AgentTelephonyIdentity, AgentTelephonyIdentity.user_id == AgentPresence.user_id)
+        .where(
+            AgentPresence.status == "available",
+            AgentTelephonyIdentity.workspace_id == workspace_id,
+            AgentTelephonyIdentity.is_active.is_(True),
+        )
+    )
+    if exclude_on_voice_call:
+        stmt = stmt.where(AgentPresence.on_voice_call.is_(False))
+    stmt = stmt.order_by(
+        AgentPresence.last_assigned_at.asc().nulls_first(),
+        AgentPresence.user_id,
+    ).limit(1)
+    agent = (await session.execute(stmt)).scalars().first()
     if agent:
         agent.last_assigned_at = datetime.now(UTC)
     return agent
