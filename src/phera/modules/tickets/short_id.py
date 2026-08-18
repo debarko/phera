@@ -63,14 +63,21 @@ async def insert_ticket_with_short_id(session: AsyncSession, ticket: Ticket) -> 
     last_error: IntegrityError | None = None
     for _ in range(_INSERT_RETRY_ATTEMPTS):
         ticket.short_id = await generate_ticket_short_id(session)
-        session.add(ticket)
         try:
             # Nested (SAVEPOINT) so a collision only unwinds this insert, not other
-            # unrelated pending work already in the caller's session.
+            # unrelated pending work already in the caller's session. `begin_nested()`
+            # itself flushes any ALREADY-pending state before opening the SAVEPOINT, so
+            # `session.add(ticket)` must happen *inside* this block — adding it first
+            # would let that pre-savepoint flush attempt (and possibly fail) the insert
+            # outside the SAVEPOINT's protection, poisoning the outer transaction instead
+            # of being safely contained by it.
             async with session.begin_nested():
+                session.add(ticket)
                 await session.flush()
             return
         except IntegrityError as exc:
-            session.expunge(ticket)
+            # begin_nested()'s own rollback-on-exception already detaches `ticket` (it
+            # was only ever added inside the SAVEPOINT) — no manual expunge needed, and
+            # attempting one here would raise (the instance is no longer in the session).
             last_error = exc
     raise RuntimeError("Could not insert ticket with a unique short_id") from last_error

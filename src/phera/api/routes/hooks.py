@@ -49,13 +49,13 @@ async def _verify_gallabox_webhook(
     signature: str | None,
 ) -> None:
     settings = get_settings()
-    bound_secret: str | None = None
 
     if inbound is not None:
         # A real message with a resolvable target — verify against ONLY that number's
-        # connector secret, so one number's secret can't authenticate another number's
-        # payload (a valid signature from Number B must not let a message be attributed
-        # to Number A's ticket).
+        # own secret, and never fall through to "any active secret in the workspace"
+        # once a specific channel is known, or a different number's secret could
+        # authenticate this payload (regardless of whether THIS channel has its own
+        # secret configured).
         channel = await resolve_channel_account(
             session,
             workspace.id,
@@ -63,31 +63,36 @@ async def _verify_gallabox_webhook(
             adapter_type="gallabox",
             address_hint=inbound.get("address_hint"),
         )
-        if channel and channel.connector_id:
-            connector = await session.get(Connector, channel.connector_id)
-            if connector and connector.secrets_encrypted:
-                bound_secret = decrypt_secrets(connector.secrets_encrypted).get(
-                    "webhook_secret", ""
-                )
+        if channel:
+            bound_secret = ""
+            if channel.connector_id:
+                connector = await session.get(Connector, channel.connector_id)
+                if connector and connector.secrets_encrypted:
+                    bound_secret = decrypt_secrets(connector.secrets_encrypted).get(
+                        "webhook_secret", ""
+                    )
+            else:
+                # Legacy env-configured channel (no connector_id) — its only secret is
+                # the env var, not any DB connector's.
+                bound_secret = settings.gallabox_webhook_secret
+            # verify_gallabox itself treats an empty secret as "open" (matching today's
+            # local-dev default for a channel with no secret configured at all) — that's
+            # a deliberate, separate policy question, not something to special-case here.
+            if not verify_gallabox(raw, signature, bound_secret):
+                raise HTTPException(401, "Invalid Gallabox signature")
+            return
 
-    if bound_secret:
-        if not verify_gallabox(raw, signature, bound_secret):
-            raise HTTPException(401, "Invalid Gallabox signature")
-        return
-
-    # No specific channel could be bound (status/unparseable event, unknown or ambiguous
-    # number, or a matched channel with no connector secret configured) — these payloads
-    # cannot be attributed to any one ticket/channel, so there is nothing for a forged
-    # signature to misroute. Fall back to checking against every configured secret.
-    candidates = await _gallabox_candidate_secrets(session, workspace)
-    non_empty = candidates or (
-        [settings.gallabox_webhook_secret] if settings.gallabox_webhook_secret else []
-    )
-    non_empty = [s for s in non_empty if s]
-    if non_empty and not any(verify_gallabox(raw, signature, s) for s in non_empty):
+    # No specific channel could be resolved (status/unparseable event, or an unknown/
+    # ambiguous number) — nothing will be attributed to any ticket regardless of the
+    # signature, so there is no cross-number injection risk here. Fall back to checking
+    # against every configured secret, purely so a genuinely malformed/garbage payload
+    # still gets a fair check against whatever secrets exist.
+    candidates = [s for s in await _gallabox_candidate_secrets(session, workspace) if s]
+    if not candidates and settings.gallabox_webhook_secret:
+        candidates = [settings.gallabox_webhook_secret]
+    if candidates and not any(verify_gallabox(raw, signature, s) for s in candidates):
         raise HTTPException(401, "Invalid Gallabox signature")
-    # non_empty == [] means no Gallabox connector (DB or legacy env) has a secret
-    # configured anywhere — open, matching today's local-dev default.
+    # candidates == [] means no secret configured anywhere — open, local-dev default.
 
 
 @router.post("/hooks/{connector_id}/{channel}")
@@ -102,8 +107,11 @@ async def inbound_webhook(
     settings = get_settings()
 
     try:
-        body = json.loads(raw.decode() or "{}") if raw else {}
-    except json.JSONDecodeError as exc:
+        body = json.loads(raw) if raw else {}
+    except ValueError as exc:
+        # json.loads accepts bytes directly and decodes internally; catching ValueError
+        # (not just JSONDecodeError) also covers a non-UTF-8 body, which would otherwise
+        # surface as an unhandled UnicodeDecodeError -> 500 instead of a clean 400.
         raise HTTPException(400, "Invalid JSON") from exc
     if not isinstance(body, dict):
         raise HTTPException(400, "JSON object required")
