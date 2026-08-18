@@ -28,7 +28,6 @@ from phera.settings import get_settings
 logger = logging.getLogger(__name__)
 
 
-
 async def dispatch_outbox_batch(session: AsyncSession, limit: int = 50) -> int:
     result = await session.execute(
         text(
@@ -43,12 +42,20 @@ async def dispatch_outbox_batch(session: AsyncSession, limit: int = 50) -> int:
         {"limit": limit},
     )
     ids = [row[0] for row in result.fetchall()]
+    queues = get_settings().worker_queue_list
+    claimed = 0
     for oid in ids:
+        event = await session.get(OutboxEvent, oid)
+        if event is None:
+            continue
+        if event.event_type == "call.ended" and "maintenance" not in queues:
+            continue
         await session.execute(
             update(OutboxEvent).where(OutboxEvent.id == oid).values(status="queued")
         )
         await process_outbox_event(session, oid)
-    return len(ids)
+        claimed += 1
+    return claimed
 
 
 async def process_outbox_event(session: AsyncSession, outbox_id: uuid.UUID) -> None:
@@ -56,28 +63,29 @@ async def process_outbox_event(session: AsyncSession, outbox_id: uuid.UUID) -> N
     event = await session.get(OutboxEvent, outbox_id)
     if not event:
         return
+    queues = get_settings().worker_queue_list
+    if event.event_type == "call.ended" and "maintenance" not in queues:
+        event.status = "pending"
+        return
     try:
-        if "workflow" in get_settings().worker_queue_list:
+        if "workflow" in queues:
             workflows = await match_workflows(session, event)
             for wf in workflows:
                 run = await start_workflow_run(session, wf, event)
                 if run:
                     await continue_run(session, run)
 
-        if "lifecycle" in get_settings().worker_queue_list:
+        if "lifecycle" in queues:
             await process_lifecycle(session, event)
 
-        if event.event_type == "call.ended" and "maintenance" in get_settings().worker_queue_list:
+        if event.event_type == "call.ended" and "maintenance" in queues:
             call_id = event.payload.get("call_id")
             if call_id:
                 from phera.modules.transcription.job import transcribe_call
 
                 await transcribe_call(session, uuid.UUID(call_id))
 
-        if (
-            event.event_type == "broadcast.requested"
-            and "communication" in get_settings().worker_queue_list
-        ):
+        if event.event_type == "broadcast.requested" and "communication" in queues:
             logger.info("Broadcast queued segment=%s", event.payload.get("segment_filter"))
 
         event.status = "processed"
@@ -100,8 +108,12 @@ async def process_lifecycle(session: AsyncSession, event: OutboxEvent) -> None:
     for dest in q.scalars().all():
         filt = dest.event_filter or {}
         types = filt.get("event_types") or []
-        if types and event.event_type not in types and not any(
-            event.event_type.startswith(t.rstrip("*")) for t in types if t.endswith("*")
+        if (
+            types
+            and event.event_type not in types
+            and not any(
+                event.event_type.startswith(t.rstrip("*")) for t in types if t.endswith("*")
+            )
         ):
             continue
         provider = MoEngageLifecycleProvider("app", "key")
@@ -111,10 +123,12 @@ async def process_lifecycle(session: AsyncSession, event: OutboxEvent) -> None:
 async def process_delayed_wakes(session: AsyncSession) -> int:
     now = datetime.now(UTC)
     q = await session.execute(
-        select(WorkflowRun).where(
+        select(WorkflowRun)
+        .where(
             WorkflowRun.status == "waiting",
             WorkflowRun.wake_at <= now,
-        ).limit(20)
+        )
+        .limit(20)
     )
     runs = q.scalars().all()
     for run in runs:
@@ -219,6 +233,7 @@ async def run_worker_loop() -> None:
                 if (
                     "workflow" in settings.worker_queue_list
                     or "lifecycle" in settings.worker_queue_list
+                    or "maintenance" in settings.worker_queue_list
                 ):
                     await dispatch_outbox_batch(session)
 

@@ -10,11 +10,19 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from phera.api.deps import get_authenticated_actor, get_db, get_workspace
+from phera.api.deps import (
+    DEFAULT_WORKSPACE_SLUG,
+    get_actor,
+    get_authenticated_actor,
+    get_db,
+    get_workspace,
+)
 from phera.api.schemas import PresenceOut, PresenceUpdate, TicketDetailOut
 from phera.authz.actor import Actor
+from phera.authz.service import ensure_user_stub
 from phera.db.commit import commit_and_notify
 from phera.db.models import AgentPresence, ChannelAccount, Ticket, TicketOffer, Workspace
+from phera.db.session import session_scope
 from phera.modules.tickets.activity import touch_ticket_activity
 from phera.modules.tickets.enrichment import ticket_detail_dict
 from phera.modules.tickets.inbox_events import (
@@ -47,6 +55,17 @@ def _apply_inbox_order(q, bucket: str):
 
 def _publish_inbox_event(payload: dict) -> None:
     publish_inbox_event(payload)
+
+
+def inbox_event_visible(payload: str, workspace_id: str) -> bool:
+    try:
+        event = json.loads(payload)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(event, dict):
+        return False
+    event_ws = event.get("workspace_id")
+    return event_ws is not None and str(event_ws) == workspace_id
 
 
 @router.get("/inbox/tickets", response_model=list[TicketDetailOut])
@@ -102,7 +121,12 @@ async def claim_ticket(
     await commit_and_notify(session)
     await session.refresh(ticket)
     _publish_inbox_event(
-        {"type": "ticket.claimed", "ticket_id": str(ticket.id), "actor_id": actor.id}
+        {
+            "type": "ticket.claimed",
+            "workspace_id": str(workspace.id),
+            "ticket_id": str(ticket.id),
+            "actor_id": actor.id,
+        }
     )
     return await ticket_detail_dict(session, ticket)
 
@@ -122,6 +146,7 @@ async def get_presence(
 async def update_presence(
     body: PresenceUpdate,
     session: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
     actor: Actor = Depends(get_authenticated_actor),
 ):
     q = await session.execute(select(AgentPresence).where(AgentPresence.user_id == actor.id))
@@ -133,15 +158,38 @@ async def update_presence(
         presence.status = body.status
         presence.updated_at = datetime.now(UTC)
     await commit_and_notify(session)
-    _publish_inbox_event({"type": "presence.updated", "user_id": actor.id, "status": body.status})
+    _publish_inbox_event(
+        {
+            "type": "presence.updated",
+            "workspace_id": str(workspace.id),
+            "user_id": actor.id,
+            "status": body.status,
+        }
+    )
     return {"user_id": actor.id, "status": body.status}
 
 
 @router.get("/inbox/stream")
 async def inbox_stream(
     request: Request,
-    actor: Actor = Depends(get_authenticated_actor),
+    actor: Actor = Depends(get_actor),
 ):
+    # Resolve/bootstrap the actor with a short-lived session rather than
+    # Depends(get_authenticated_actor): that dependency's session stays open for
+    # the entire StreamingResponse lifetime (i.e. the whole SSE connection), which
+    # exhausts the DB pool once enough tabs are open. See git history for context.
+    if not actor.id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    async with session_scope() as session:
+        q = await session.execute(select(Workspace).where(Workspace.slug == DEFAULT_WORKSPACE_SLUG))
+        workspace = q.scalar_one_or_none()
+        if not workspace:
+            raise HTTPException(
+                status_code=503, detail="Workspace not initialized — run migrations/seed"
+            )
+        await ensure_user_stub(session, actor, workspace.id)
+
+    workspace_id = str(workspace.id)
     queue = subscribe_inbox()
 
     async def event_generator():
@@ -152,6 +200,8 @@ async def inbox_stream(
                     break
                 try:
                     payload = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    if not inbox_event_visible(payload, workspace_id):
+                        continue
                     yield f"data: {payload}\n\n"
                 except TimeoutError:
                     yield ": keepalive\n\n"

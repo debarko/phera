@@ -32,12 +32,12 @@ services:
       OTEL_ENABLED: "1"
       PHERA_ROLE: all
     ports:
-      - "8000:8000"
+      - "8010:8010"
     depends_on:
       - postgres
       - redis
       - otel-collector
-    command: ["phera", "all", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["phera", "all", "--host", "0.0.0.0", "--port", "8010"]
 
 volumes:
   phera_pg:

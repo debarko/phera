@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets as secrets_module
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,7 @@ from phera.authz.actor import Actor
 from phera.db.commit import commit_and_notify
 from phera.db.models import ChannelAccount, Connector, Workspace
 from phera.modules.connectors.registry import get_adapter
+from phera.modules.tickets.inbound import normalize_channel_address
 from phera.security.crypto import decrypt_secrets, encrypt_secrets
 
 router = APIRouter(tags=["connectors"])
@@ -346,4 +348,72 @@ async def create_whatsapp_channel(
         connector=_connector_out(connector),
         channel_account_id=account.id,
         address=account.address,
+    )
+
+
+class VoiceChannelCreate(BaseModel):
+    name: str
+    exophone: str
+    credentials: dict = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
+    routing_policy_id: uuid.UUID | None = None
+
+
+class VoiceChannelOut(ORMModel):
+    connector: ConnectorOut
+    channel_account_id: uuid.UUID
+    address: str
+    webhook_token: str
+
+
+@router.post("/voice-channels", response_model=VoiceChannelOut, status_code=201)
+async def create_voice_channel(
+    body: VoiceChannelCreate,
+    session: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+    actor: Actor = Depends(get_authenticated_actor),
+):
+    _require_manage(actor)
+    _reject_secret_shaped_credentials(body.credentials)
+    # `webhook_token` authenticates Exotel's unsigned routing/lifecycle callbacks (see
+    # voice_hooks.py) — auto-generate if the caller didn't supply one, and return it once
+    # here so it can be pasted into the Connect-applet dynamic URL / StatusCallback config
+    # in Exotel's dashboard. It is never returned again after this response.
+    secrets = dict(body.secrets)
+    supplied = (secrets.get("webhook_token") or "").strip()
+    if supplied and len(supplied) < 32:
+        raise HTTPException(400, "webhook_token must be at least 32 characters")
+    webhook_token = supplied or secrets_module.token_urlsafe(32)
+    secrets["webhook_token"] = webhook_token
+
+    connector = Connector(
+        id=uuid.uuid4(),
+        workspace_id=workspace.id,
+        type="exotel",
+        name=body.name,
+        credentials=body.credentials,
+        secrets_encrypted=_encrypted_secrets(secrets),
+    )
+    session.add(connector)
+    await session.flush()
+
+    account = ChannelAccount(
+        id=uuid.uuid4(),
+        workspace_id=workspace.id,
+        kind="voice",
+        adapter_type="exotel",
+        address=normalize_channel_address(body.exophone) or body.exophone,
+        connector_id=connector.id,
+        routing_policy_id=body.routing_policy_id,
+        is_active=True,
+    )
+    session.add(account)
+    await commit_and_notify(session)
+    await session.refresh(connector)
+
+    return VoiceChannelOut(
+        connector=_connector_out(connector),
+        channel_account_id=account.id,
+        address=account.address,
+        webhook_token=webhook_token,
     )

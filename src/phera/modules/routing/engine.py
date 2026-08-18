@@ -6,7 +6,27 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from phera.db.models import AgentPresence, RoutingPolicy, RoutingTier, Ticket, TicketOffer
+from phera.db.models import (
+    AgentPresence,
+    AgentTelephonyIdentity,
+    RoutingPolicy,
+    RoutingTier,
+    Ticket,
+    TicketOffer,
+)
+
+
+async def _select_available_agent(
+    session: AsyncSession, *, exclude_on_voice_call: bool = False
+) -> AgentPresence | None:
+    stmt = select(AgentPresence).where(AgentPresence.status == "available")
+    if exclude_on_voice_call:
+        stmt = stmt.where(AgentPresence.on_voice_call.is_(False))
+    stmt = stmt.order_by(
+        AgentPresence.last_assigned_at.asc().nulls_first(),
+        AgentPresence.user_id,
+    ).limit(1)
+    return (await session.execute(stmt)).scalars().first()
 
 
 async def route_unassigned_ticket(
@@ -21,14 +41,10 @@ async def route_unassigned_ticket(
     if not tier or not tier.team_id:
         return None
 
-    agents_q = await session.execute(
-        select(AgentPresence).where(AgentPresence.status == "available").limit(10)
-    )
-    agents = agents_q.scalars().all()
-    if not agents:
+    agent = await _select_available_agent(session, exclude_on_voice_call=policy.focus_on_voice)
+    if not agent:
         return None
 
-    agent = agents[0]
     offer = TicketOffer(
         id=uuid.uuid4(),
         ticket_id=ticket.id,
@@ -40,9 +56,39 @@ async def route_unassigned_ticket(
     return offer
 
 
+async def select_agent_for_voice(
+    session: AsyncSession, policy: RoutingPolicy | None, workspace_id: uuid.UUID
+) -> AgentPresence | None:
+    """Pick an agent to ring for an inbound call — direct assignment, not an offer/claim
+    step like `route_unassigned_ticket`, since the call is already ringing by the time
+    Exotel's routing webhook calls this."""
+    exclude_on_voice_call = bool(policy and policy.focus_on_voice)
+    stmt = (
+        select(AgentPresence)
+        .join(AgentTelephonyIdentity, AgentTelephonyIdentity.user_id == AgentPresence.user_id)
+        .where(
+            AgentPresence.status == "available",
+            AgentTelephonyIdentity.workspace_id == workspace_id,
+            AgentTelephonyIdentity.is_active.is_(True),
+        )
+    )
+    if exclude_on_voice_call:
+        stmt = stmt.where(AgentPresence.on_voice_call.is_(False))
+    stmt = stmt.order_by(
+        AgentPresence.last_assigned_at.asc().nulls_first(),
+        AgentPresence.user_id,
+    ).limit(1)
+    agent = (await session.execute(stmt)).scalars().first()
+    if agent:
+        agent.last_assigned_at = datetime.now(UTC)
+    return agent
+
+
 async def agent_open_load(session: AsyncSession, user_id: str) -> int:
     q = await session.execute(
-        select(func.count()).select_from(Ticket).where(
+        select(func.count())
+        .select_from(Ticket)
+        .where(
             Ticket.assignee_user_id == user_id,
             Ticket.status.in_(["open", "pending"]),
         )

@@ -15,17 +15,32 @@ from phera.api.schemas import (
     DealAssign,
     DealCreate,
     DealOut,
+    DealPersonOut,
     DealUpdateStage,
     OrganizationCreate,
     OrganizationOut,
     PipelineCreate,
     PipelineOut,
+    PipelineTeamsUpdate,
     StageOut,
 )
 from phera.authz.actor import Actor
+from phera.authz.service import filter_deals_for_actor, get_actor_team_ids
+from phera.authz.visibility import can_see_pipeline
 from phera.db.commit import commit_and_notify
-from phera.db.models import Contact, Deal, Organization, Pipeline, Stage, Workspace
+from phera.db.models import (
+    Contact,
+    Deal,
+    Organization,
+    Pipeline,
+    PipelineTeam,
+    Stage,
+    Team,
+    User,
+    Workspace,
+)
 from phera.db.mutate import FieldChange, MutateRequest, mutate
+from phera.modules.tickets.inbox_events import publish_inbox_event
 
 router = APIRouter(tags=["contacts"])
 
@@ -147,6 +162,19 @@ async def create_organization(
     return org
 
 
+def _can_manage_pipelines(actor: Actor) -> bool:
+    if actor.unrestricted:
+        return True
+    if "admin" in actor.roles:
+        return True
+    return actor.has_permission("crm.pipelines.write")
+
+
+def _require_manage_pipelines(actor: Actor) -> None:
+    if not _can_manage_pipelines(actor):
+        raise HTTPException(403, "Missing pipeline management permission")
+
+
 @router.get("/pipelines", response_model=list[PipelineOut])
 async def list_pipelines(
     session: AsyncSession = Depends(get_db),
@@ -155,8 +183,21 @@ async def list_pipelines(
 ):
     q = await session.execute(select(Pipeline).where(Pipeline.workspace_id == workspace.id))
     pipelines = q.scalars().all()
+
+    actor_team_ids = await get_actor_team_ids(session, actor)
+    grants_q = await session.execute(
+        select(PipelineTeam.pipeline_id, PipelineTeam.team_id).where(
+            PipelineTeam.pipeline_id.in_([p.id for p in pipelines])
+        )
+    )
+    grants_by_pipeline: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for pipeline_id, team_id in grants_q.all():
+        grants_by_pipeline.setdefault(pipeline_id, set()).add(team_id)
+
     result = []
     for p in pipelines:
+        if not can_see_pipeline(actor, grants_by_pipeline.get(p.id, set()), actor_team_ids):
+            continue
         sq = await session.execute(
             select(Stage).where(Stage.pipeline_id == p.id).order_by(Stage.position)
         )
@@ -181,8 +222,29 @@ async def create_pipeline(
     workspace: Workspace = Depends(get_workspace),
     actor: Actor = Depends(get_authenticated_actor),
 ):
-    pipeline = Pipeline(id=uuid.uuid4(), workspace_id=workspace.id, **body.model_dump())
+    _require_manage_pipelines(actor)
+    pipeline = Pipeline(
+        id=uuid.uuid4(),
+        workspace_id=workspace.id,
+        **body.model_dump(exclude={"stages"}),
+    )
     session.add(pipeline)
+    await session.flush()
+
+    stages_out = []
+    for position, stage_in in enumerate(body.stages):
+        stage = Stage(
+            id=uuid.uuid4(),
+            pipeline_id=pipeline.id,
+            name=stage_in.name,
+            position=position,
+            category=stage_in.category,
+            sla_hours=stage_in.sla_hours,
+            probability=stage_in.probability,
+        )
+        session.add(stage)
+        stages_out.append(stage)
+
     await commit_and_notify(session)
     await session.refresh(pipeline)
     return PipelineOut(
@@ -191,18 +253,124 @@ async def create_pipeline(
         slug=pipeline.slug,
         is_active=pipeline.is_active,
         resubmission_policy=pipeline.resubmission_policy,
-        stages=[],
+        stages=[StageOut.model_validate(s) for s in stages_out],
     )
 
 
-@router.get("/deals", response_model=list[DealOut])
-async def list_deals(
+@router.get("/pipelines/{pipeline_id}/teams", response_model=list[uuid.UUID])
+async def get_pipeline_teams(
+    pipeline_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     workspace: Workspace = Depends(get_workspace),
     actor: Actor = Depends(get_authenticated_actor),
 ):
-    q = await session.execute(select(Deal).where(Deal.workspace_id == workspace.id))
-    return q.scalars().all()
+    pipeline = await session.get(Pipeline, pipeline_id)
+    if not pipeline or pipeline.workspace_id != workspace.id:
+        raise HTTPException(404, "Pipeline not found")
+    q = await session.execute(
+        select(PipelineTeam.team_id).where(PipelineTeam.pipeline_id == pipeline_id)
+    )
+    return list(q.scalars().all())
+
+
+@router.put("/pipelines/{pipeline_id}/teams", response_model=list[uuid.UUID])
+async def replace_pipeline_teams(
+    pipeline_id: uuid.UUID,
+    body: PipelineTeamsUpdate,
+    session: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+    actor: Actor = Depends(get_authenticated_actor),
+):
+    _require_manage_pipelines(actor)
+    pipeline = await session.get(Pipeline, pipeline_id)
+    if not pipeline or pipeline.workspace_id != workspace.id:
+        raise HTTPException(404, "Pipeline not found")
+
+    requested_ids = set(body.team_ids)
+    if len(requested_ids) != len(body.team_ids):
+        raise HTTPException(422, "team_ids must not contain duplicates")
+
+    if requested_ids:
+        teams_q = await session.execute(
+            select(Team.id).where(
+                Team.workspace_id == workspace.id,
+                Team.id.in_(requested_ids),
+            )
+        )
+        if set(teams_q.scalars()) != requested_ids:
+            raise HTTPException(422, "One or more teams do not belong to this workspace")
+
+    existing_q = await session.execute(
+        select(PipelineTeam).where(PipelineTeam.pipeline_id == pipeline_id)
+    )
+    for grant in existing_q.scalars().all():
+        await session.delete(grant)
+    await session.flush()
+
+    for team_id in body.team_ids:
+        session.add(PipelineTeam(pipeline_id=pipeline_id, team_id=team_id))
+
+    await commit_and_notify(session)
+    return body.team_ids
+
+
+@router.get("/deals", response_model=list[DealOut])
+async def list_deals(
+    pipeline_id: uuid.UUID | None = None,
+    stage_id: uuid.UUID | None = None,
+    owner_user_id: str | None = None,
+    status: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db),
+    workspace: Workspace = Depends(get_workspace),
+    actor: Actor = Depends(get_authenticated_actor),
+):
+    stmt = select(Deal).where(Deal.workspace_id == workspace.id)
+    if pipeline_id is not None:
+        stmt = stmt.where(Deal.pipeline_id == pipeline_id)
+    if stage_id is not None:
+        stmt = stmt.where(Deal.stage_id == stage_id)
+    if owner_user_id is not None:
+        stmt = stmt.where(Deal.owner_user_id == owner_user_id)
+    if status is not None:
+        stmt = stmt.where(Deal.status == status)
+    stmt = stmt.order_by(Deal.stage_entered_at.desc()).limit(min(limit, 500)).offset(offset)
+
+    q = await session.execute(stmt)
+    deals = list(q.scalars().all())
+    deals = await filter_deals_for_actor(session, actor, workspace.id, deals)
+    if not deals:
+        return []
+
+    contact_ids = {d.contact_id for d in deals}
+    owner_ids = {d.owner_user_id for d in deals if d.owner_user_id}
+    contacts_q = await session.execute(select(Contact).where(Contact.id.in_(contact_ids)))
+    contacts_by_id = {c.id: c for c in contacts_q.scalars().all()}
+    owners_by_id: dict[str, User] = {}
+    if owner_ids:
+        owners_q = await session.execute(select(User).where(User.id.in_(owner_ids)))
+        owners_by_id = {u.id: u for u in owners_q.scalars().all()}
+
+    result = []
+    for deal in deals:
+        contact = contacts_by_id.get(deal.contact_id)
+        owner = owners_by_id.get(deal.owner_user_id) if deal.owner_user_id else None
+        result.append(
+            DealOut(
+                id=deal.id,
+                contact_id=deal.contact_id,
+                pipeline_id=deal.pipeline_id,
+                stage_id=deal.stage_id,
+                owner_user_id=deal.owner_user_id,
+                status=deal.status,
+                value=deal.value,
+                stage_entered_at=deal.stage_entered_at,
+                contact=DealPersonOut(id=str(contact.id), name=contact.name) if contact else None,
+                owner=DealPersonOut(id=owner.id, name=owner.name) if owner else None,
+            )
+        )
+    return result
 
 
 @router.post("/deals", response_model=DealOut, status_code=201)
@@ -241,6 +409,16 @@ async def create_deal(
     )
     await commit_and_notify(session)
     await session.refresh(deal)
+    publish_inbox_event(
+        {
+            "type": "deal.created",
+            "workspace_id": str(workspace.id),
+            "deal_id": str(deal.id),
+            "pipeline_id": str(deal.pipeline_id),
+            "stage_id": str(deal.stage_id),
+            "contact_id": str(deal.contact_id),
+        }
+    )
     return deal
 
 
@@ -255,6 +433,9 @@ async def move_deal_stage(
     deal = await session.get(Deal, deal_id)
     if not deal or deal.workspace_id != workspace.id:
         raise HTTPException(404, "Deal not found")
+    target_stage = await session.get(Stage, body.stage_id)
+    if not target_stage or target_stage.pipeline_id != deal.pipeline_id:
+        raise HTTPException(400, "Target stage does not belong to this deal's pipeline")
     old_stage = deal.stage_id
     deal.stage_id = body.stage_id
     deal.stage_entered_at = datetime.now(UTC)
@@ -287,6 +468,17 @@ async def move_deal_stage(
     )
     await commit_and_notify(session)
     await session.refresh(deal)
+    publish_inbox_event(
+        {
+            "type": "deal.stage_changed",
+            "workspace_id": str(workspace.id),
+            "deal_id": str(deal.id),
+            "pipeline_id": str(deal.pipeline_id),
+            "stage_from": str(old_stage),
+            "stage_to": str(body.stage_id),
+            "contact_id": str(deal.contact_id),
+        }
+    )
     return deal
 
 
@@ -322,4 +514,14 @@ async def assign_deal(
     )
     await commit_and_notify(session)
     await session.refresh(deal)
+    publish_inbox_event(
+        {
+            "type": "deal.assigned",
+            "workspace_id": str(workspace.id),
+            "deal_id": str(deal.id),
+            "pipeline_id": str(deal.pipeline_id),
+            "owner_user_id": deal.owner_user_id,
+            "contact_id": str(deal.contact_id),
+        }
+    )
     return deal

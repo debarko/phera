@@ -98,6 +98,7 @@ async def start_call(
         publish_inbox_event(
             {
                 "type": "call.started",
+                "workspace_id": str(workspace.id),
                 "ticket_id": str(body.ticket_id),
                 "actor_id": actor.id,
             }

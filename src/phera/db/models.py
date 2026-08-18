@@ -61,6 +61,14 @@ class Team(Base, TimestampMixin):
     __table_args__ = (UniqueConstraint("workspace_id", "slug"),)
 
 
+class TeamMember(Base, TimestampMixin):
+    __tablename__ = "team_members"
+
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    role: Mapped[str] = mapped_column(String(32), default="member")
+
+
 class OwnershipProfile(Base, TimestampMixin):
     __tablename__ = "ownership_profiles"
 
@@ -389,6 +397,24 @@ class AgentPresence(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AgentTelephonyIdentity(Base, TimestampMixin):
+    """Per-agent SIP credentials for the WebRTC softphone (e.g. Exotel). MVP provisioning
+    is manual — an admin copies these out of the vendor's own dashboard."""
+
+    __tablename__ = "agent_telephony_identities"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(32), default="exotel")
+    sip_user: Mapped[str] = mapped_column(String(255), nullable=False)
+    sip_secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    sip_domain: Mapped[str] = mapped_column(String(255), nullable=False)
+    sip_port: Mapped[int] = mapped_column(Integer, default=443)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class TicketOffer(Base):
     __tablename__ = "ticket_offers"
 
@@ -507,6 +533,7 @@ class Call(Base, TimestampMixin):
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
     contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id"))
     ticket_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tickets.id"))
+    agent_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     provider_call_id: Mapped[str | None] = mapped_column(String(255))
     direction: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -515,6 +542,15 @@ class Call(Base, TimestampMixin):
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     recording_url: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32), default="initiated")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "provider",
+            "provider_call_id",
+            name="uq_calls_workspace_provider_call_id",
+        ),
+    )
 
 
 class Transcript(Base):

@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from phera.modules.connectors.exotel import ExotelTelephonyProvider, test_exotel_credentials
 from phera.modules.connectors.gallabox import (
     GallaboxMessagingProvider,
     test_gallabox_credentials,
@@ -29,7 +30,7 @@ from phera.modules.connectors.imap_smtp import ImapSmtpEmailProvider, test_imap_
 @dataclass
 class AdapterSpec:
     type: str
-    kind: str  # "email" | "messaging"
+    kind: str  # "email" | "messaging" | "voice"
     provider_cls: type
     test_fn: Callable[[dict, dict], Awaitable[dict]]
     webhook_connector_id: str | None = None
@@ -54,6 +55,12 @@ ADAPTERS: dict[str, AdapterSpec] = {
         verify_signature_fn=gallabox_verify_signature,
         parse_inbound_fn=gallabox_parse_inbound,
         signature_header="x-gallabox-signature",
+    ),
+    "exotel": AdapterSpec(
+        type="exotel",
+        kind="voice",
+        provider_cls=ExotelTelephonyProvider,
+        test_fn=test_exotel_credentials,
     ),
 }
 
