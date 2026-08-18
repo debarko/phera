@@ -1,62 +1,90 @@
-# Phera
+<p align="center">
+  <img src="docs/assets/social-preview.jpg" alt="Phera — headless CRM. One contact, many pipelines. FastAPI + Postgres. Bring your own UI." width="100%">
+</p>
 
-**ফেরা — the return.** A headless CRM: configurable funnels, an omnichannel
-support inbox, event-driven workflows, and an audit trail that doubles as
-your analytics warehouse. No product UI ships in the box — bring your own
-client, or drive it from a script.
+<h1 align="center">Phera</h1>
+<p align="center"><strong>ফেরা — the return.</strong></p>
+<p align="center">
+  A <strong>headless CRM</strong> you run yourself: configurable pipelines, an omnichannel
+  support inbox, event-driven workflows, and an audit trail that doubles as analytics.
+  No product UI ships in the box — bring your own client, or drive it from a script.
+</p>
 
-[![Tests](https://github.com/debarko/phera/actions/workflows/ci.yml/badge.svg)](https://github.com/debarko/phera/actions/workflows/ci.yml)
-[![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/debarko/phera?utm_source=oss&utm_medium=github&utm_campaign=debarko%2Fphera&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)](https://coderabbit.ai)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![License: BUSL 1.1](https://img.shields.io/badge/license-BUSL%201.1-blue)](LICENSE)
+<p align="center">
+  <a href="https://debarko.de/products/phera">Walkthrough</a>
+  ·
+  <a href="https://github.com/debarko/phera/blob/main/CHANNELS.md">Channels</a>
+  ·
+  <a href="#quick-start">Quick start</a>
+  ·
+  <a href="LICENSE">License</a>
+</p>
 
-**[Read the full walkthrough →](https://debarko.de/products/phera)**
+<p align="center">
+  <a href="https://github.com/debarko/phera/actions/workflows/ci.yml"><img src="https://github.com/debarko/phera/actions/workflows/ci.yml/badge.svg" alt="Tests"></a>
+  <a href="https://github.com/debarko/phera/stargazers"><img src="https://img.shields.io/github/stars/debarko/phera?style=flat" alt="GitHub stars"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python 3.12+"></a>
+  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white" alt="FastAPI"></a>
+  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/postgres-async-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BUSL%201.1-blue" alt="License: BUSL 1.1"></a>
+  <a href="https://coderabbit.ai"><img src="https://img.shields.io/coderabbit/prs/github/debarko/phera?utm_source=oss&utm_medium=github&utm_campaign=debarko%2Fphera&labelColor=171717&color=FF570A&label=CodeRabbit+Reviews" alt="CodeRabbit Pull Request Reviews"></a>
+</p>
 
-## Why
+---
 
-A CRM is infrastructure, not a seat. Most teams end up with rich operational
-software and still no relationship layer: a lead table scoped to one
-channel, no support ticketing, a customer's calls/tickets/deals scattered
-across tables with nothing tying them together.
+## Why a headless CRM
 
-The deeper problem: **one person is not one journey.** The same contact can
-fill three different forms over three months, each a different commercial
-motion run by a different team. Collapsing that onto a single "lead status"
-field loses two of the three journeys. Phera keeps the person (`Contact`)
-and the journey (`Deal` in a `Pipeline`) as separate records from day one —
-a Contact can sit in many funnels at once.
+A CRM is **infrastructure**, not a seat. Most teams already have operational software and still no relationship layer: a lead table scoped to one channel, no support ticketing, and a customer's calls, tickets, and deals scattered across tables with nothing tying them together.
 
-- **Vertical-agnostic core** — no hospital, no e-commerce, no SaaS
-  vocabulary baked into the domain model. Map your vertical on top of
-  `Contact` / `Pipeline` / `Deal`.
-- **Config over code** — funnels, stages, ownership rules and workflows are
-  data. Adding one is an admin screen, not a pull request.
-- **Pluggable everything** — telephony, email, messaging and lifecycle/CDP
-  providers sit behind interfaces. The core never imports a vendor SDK.
-- **Audit trail as analytics** — every mutation writes its own history. A
-  nightly job folds it into daily metrics. No warehouse, no CDC stream.
+The deeper problem: **one person is not one journey.** The same contact can fill three forms over three months — each a different commercial motion, run by a different team. Collapsing that onto a single "lead status" field loses two of the three journeys.
+
+Phera keeps the person (`Contact`) and the journey (`Deal` in a `Pipeline`) as separate records from day one. A contact can sit in many funnels at once.
+
+| Principle | What it means |
+|---|---|
+| **Vertical-agnostic core** | No hospital, e-commerce, or SaaS vocabulary in the domain model. Map *your* vertical onto Contact / Pipeline / Deal. |
+| **Config over code** | Funnels, stages, ownership rules, and workflows are data. Adding one is an admin screen, not a pull request. |
+| **Pluggable everything** | WhatsApp, email, voice, and lifecycle/CDP providers sit behind interfaces. The core never imports a vendor SDK. |
+| **Audit trail as analytics** | Every mutation writes its own history. A nightly job folds it into daily metrics. No warehouse, no CDC stream. |
+
+## What's in the box
+
+- **Configurable funnels** — pipelines and stages are admin-owned; create, clone, reorder without a deploy.
+- **Omnichannel inbox** — WhatsApp, email, and phone normalize into one ticket. One routing engine, one capacity pool, L1 → L2 overflow.
+- **Workflow engine** — n8n-style graphs on domain events and time-based waits, run on horizontally scaled workers.
+- **Voice** — Exotel inbound routing, per-agent SIP identities, call lifecycle, recording, and transcription on the contact timeline.
+- **Ownership** — contact-centric or pipeline-centric. A workspace setting, not a fork.
+- **Teams** — membership and pipeline visibility so records can be scoped to a team, not only an individual owner.
+
+## Built for one vertical at a time — by config
+
+The core has no industry baked in. These are shapes the same Contact / Pipeline / Deal model already fits:
+
+| Vertical | The "one person, many journeys" problem |
+|---|---|
+| **Real estate** | A buyer renting, resale-hunting, and pre-approving new construction — without three lead statuses fighting each other. |
+| **Home services** | Roof quote, then gutter cleaning two months later — same address, before a second truck rolls. |
+| **Insurance** | Auto, home, and life as three policies and one relationship — plus an audit trail compliance already wants. |
+| **Legal** | Two matters, two practice groups, one immutable file of every deadline and touch. |
+| **Retail** | A wholesale account and a loyalty-program shopper turn out to be the same person. |
 
 ## Architecture — same binary, two roles
 
-One image, two commands. `phera api` serves HTTP and WebSocket;
-`phera worker` drains queues; `phera all` runs both on a laptop. Scaling
-out is more boxes of the same image, never a new microservice. Adapters —
-messaging, email, voice, lifecycle — are the only thing that changes per
-deployment.
+One image, two commands. `phera api` serves HTTP; `phera worker` drains queues; `phera all` runs both on a laptop. Scaling out is more boxes of the same image, never a new microservice. Adapters — messaging, email, voice, lifecycle — are the only thing that changes per deployment.
 
 ```mermaid
 flowchart TB
-    client["Your client<br/>curl · a web app · another service"] -->|REST / WebSocket| api
+    client["Your client<br/>curl · a web app · another service"] -->|REST / SSE| api
 
     subgraph binary["same image — phera all runs both, one box"]
         direction LR
-        api["phera api<br/>HTTP / WS"]
+        api["phera api<br/>HTTP / SSE"]
         worker["phera worker<br/>queue consumers"]
     end
 
     msg["Messaging<br/>Gallabox / WhatsApp"] --> api
-    email["Email<br/>Google Group"] --> api
-    voice["Voice<br/>Acefone, Exotel next"] --> api
+    email["Email<br/>IMAP / SMTP · Google Group"] --> api
+    voice["Voice<br/>Exotel"] --> api
     lifecycle["Lifecycle<br/>MoEngage, CleverTap, webhook"] --> api
 
     api --> pg[(Postgres)]
@@ -70,14 +98,11 @@ flowchart TB
     class binary accent;
 ```
 
+**Stack:** FastAPI · SQLAlchemy (async) · Postgres · Redis · Alembic · OpenTelemetry · Typer CLI · Docker
+
 ## Every mutation writes its own history
 
-All writes go through one helper. It updates the row, appends an immutable
-`AuditEvent` and an `OutboxEvent` in the **same transaction**, then
-commits. Nothing is lost if Redis is briefly down — the broker is notified
-only after commit, and a dispatcher heals any miss. A nightly job folds the
-log into small daily tables, so aging and TAT numbers come from the same
-database, not a warehouse.
+All writes go through one helper. It updates the row, appends an immutable `AuditEvent` and an `OutboxEvent` in the **same transaction**, then commits. Nothing is lost if Redis is briefly down — the broker is notified only after commit, and a dispatcher heals any miss. A nightly job folds the log into small daily tables, so aging and TAT numbers come from the same database, not a warehouse.
 
 ```mermaid
 flowchart TD
@@ -107,31 +132,16 @@ flowchart TD
 | Entity | What it is |
 |---|---|
 | `Contact` | A person. The unified-timeline anchor — not a lead. |
-| `Pipeline` | A funnel: named, ordered stages. Admins create these, no deploy. |
-| `Stage` | One step in a Pipeline — open, won or lost category, optional SLA. |
-| `Deal` | One Contact's membership in one Pipeline. This is the lead. |
+| `Pipeline` | A funnel: named, ordered stages. Admins create these; no deploy. |
+| `Stage` | One step in a pipeline — open, won, or lost, with an optional SLA. |
+| `Deal` | One contact's membership in one pipeline. **This** is the lead. |
 | `Ticket` | A support request. One inbox regardless of channel. |
+| `Team` | A group of agents. Pipelines can be granted to teams for visibility. |
 | `Interaction` | Append-only row behind the contact-facing timeline. |
 | `AuditEvent` | Immutable record of every mutation — who, what, when, from → to. |
 | `Workflow` | A published graph: trigger → conditions → wait/branch → actions. |
 
-Stage lives on the `Deal`, never on the `Contact` — there is no
-`Contact.stage`, only a list of Deals, each with its own owner and
-position.
-
-## What's in the box
-
-- **Configurable funnels** — Pipelines and stages are admin-owned objects;
-  create, clone, reorder without a deploy. One Contact can sit in several
-  at once.
-- **Omnichannel inbox** — email, WhatsApp and phone normalize into one
-  Ticket. One routing engine, one capacity pool, L1 → L2 overflow.
-- **Workflow engine** — n8n-style graphs react to domain events and
-  time-based waits, executed asynchronously on horizontally scaled workers.
-- **Call transcription** — inbound and outbound calls through a connected
-  provider are recorded, transcribed, and attached to the contact timeline.
-- **Configurable ownership** — contact-centric or pipeline-centric, a
-  workspace setting decides who owns what, not a fork of the codebase.
+Stage lives on the `Deal`, never on the `Contact`. There is no `Contact.stage` — only a list of deals, each with its own owner and position.
 
 ## Quick start
 
@@ -146,29 +156,32 @@ alembic upgrade head
 phera all
 ```
 
-API: http://localhost:8010/docs
-Health: http://localhost:8010/health
+| | URL |
+|---|---|
+| API docs | http://localhost:8010/docs |
+| Health | http://localhost:8010/health |
+
+Auth is `X-Actor-*` headers only — no JWT in the service. WhatsApp (Gallabox) and email setup: [CHANNELS.md](CHANNELS.md).
 
 ## Process roles
 
 | Command | Role |
 |---|---|
-| `phera api` | HTTP/WS only |
+| `phera api` | HTTP only |
 | `phera worker` | Queue consumers |
 | `phera all` | API + worker (local dev) |
 
 ## Observability
 
-Set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` (default). Traces, metrics, and slow SQL export via OTLP HTTP to any compatible backend (SigNoz, etc.).
+Set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` (default). Traces, metrics, and slow SQL export via OTLP HTTP to any compatible backend (SigNoz, Grafana, Honeycomb, …).
 
 ## Testing
 
-Tests split into **unit** (no database) and **integration** (ephemeral in-memory SQLite, created and destroyed per test). No Docker, Postgres, or Redis required for CI or nightly runs.
+Tests split into **unit** (no database) and **integration** (ephemeral in-memory SQLite, created and destroyed per test). No Docker, Postgres, or Redis required for CI.
 
 | Command | What it runs |
 |---|---|
 | `make test` | Unit tests only (default) |
-| `make test-unit` | Same as `make test` |
 | `make test-integration` | Flow tests with ephemeral SQLite |
 | `make test-nightly` | Full suite — unit + integration |
 | `make test-cov` | Full suite with coverage report |
@@ -178,31 +191,20 @@ make test              # fast, no DB
 make test-nightly      # exhaustive regression suite
 ```
 
-Unit tests override FastAPI dependencies so no SQL is executed. Integration tests spin up an in-memory SQLite schema per test, exercise real mutate/audit/outbox/form/workflow/routing flows, then drop the schema.
-
-Environment variables used in CI and locally:
-
 ```bash
 OTEL_ENABLED=0 REDIS_URL=
 ```
 
-## Auth
-
-Phera authorizes from `X-Actor-*` headers only — no JWT in the service.
-
-## Channels
-
-WhatsApp (Gallabox) and email (Google Group → inbound hook) setup: see [CHANNELS.md](CHANNELS.md).
-
 ## Contributing
 
-Issues and pull requests are welcome — read the code, open an issue, send
-a PR. `make test` before you push; CI runs the same suite on every PR.
+Issues and pull requests are welcome. Read the code, open an issue, send a PR. Run `make test` before you push — CI runs the same suite on every PR.
 
 ## License
 
-[Business Source License 1.1](LICENSE). Free to use, modify, self-host,
-and build commercial products on top of. The one thing it restricts:
-offering Phera itself — modified or not — to third parties as a hosted
-or managed service without a separate agreement. Converts automatically
-to Apache License 2.0 on 2030-08-16.
+[Business Source License 1.1](LICENSE). Free to use, modify, self-host, and build commercial products on top of. The one restriction: do not offer Phera itself — modified or not — to third parties as a hosted or managed service without a separate agreement. Converts automatically to Apache License 2.0 on 2030-08-16.
+
+---
+
+<p align="center">
+  <sub>If this model matches how your team actually sells and supports people, star the repo so others can find it.</sub>
+</p>
