@@ -136,6 +136,7 @@ class TicketAssign(BaseModel):
 
 class TicketOut(ORMModel):
     id: uuid.UUID
+    short_id: str | None = None
     contact_id: uuid.UUID
     assignee_user_id: str | None
     subject: str | None

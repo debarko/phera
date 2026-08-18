@@ -13,10 +13,28 @@ from email.message import EmailMessage
 from email.utils import make_msgid, parseaddr
 from typing import Any
 
+from email_reply_parser import EmailReplyParser
+
 from phera.modules.connectors.interfaces import EmailProvider
 from phera.settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def strip_quoted_reply(text: str) -> str:
+    """Strip quoted history and signature blocks from a plain-text email body.
+
+    Heuristic (via email_reply_parser) — not perfect across every client/locale's reply
+    format, so falls back to the original text if stripping would leave nothing behind.
+    """
+    if not text:
+        return text
+    try:
+        cleaned = EmailReplyParser.parse_reply(text).strip()
+    except Exception:
+        logger.exception("Failed to strip quoted reply text")
+        return text.strip()
+    return cleaned or text.strip()
 
 
 def verify_signature(raw_body: bytes, signature: str | None, secret: str) -> bool:
@@ -35,8 +53,16 @@ def _header(msg: email.message.Message, name: str) -> str | None:
     return value.strip() if value else None
 
 
-def parse_rfc822(raw: str) -> dict:
-    msg = email.message_from_string(raw)
+def parse_rfc822(raw: str | bytes) -> dict:
+    # Parse from bytes when available (message_from_bytes) rather than decoding the whole
+    # message to str first — each part's body is still decoded per its own declared
+    # charset below, so this avoids a premature, lossy top-level UTF-8 decode of the
+    # entire message for non-UTF-8 mail.
+    msg = (
+        email.message_from_bytes(raw)
+        if isinstance(raw, bytes)
+        else email.message_from_string(raw)
+    )
     body = None
     if msg.is_multipart():
         for part in msg.walk():
@@ -73,7 +99,8 @@ def parse_inbound(payload: dict) -> dict | None:
     _, from_addr = parseaddr(from_addr)
     to_addr = str(payload.get("to") or payload.get("recipient") or "").strip()
     _, to_addr = parseaddr(to_addr)
-    body = str(payload.get("text") or payload.get("body") or payload.get("plain") or "").strip()
+    raw_body = str(payload.get("text") or payload.get("body") or payload.get("plain") or "").strip()
+    body = strip_quoted_reply(raw_body)
     if not from_addr or not body:
         return None
 

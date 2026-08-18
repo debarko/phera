@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from phera.authz.actor import Actor
 from phera.db.models import (
     ChannelAccount,
+    Connector,
     Contact,
     Deal,
     Form,
@@ -112,6 +113,7 @@ def channel_account(
     kind: str = "messaging",
     adapter_type: str = "gallabox",
     address: str = "+919876543210",
+    connector_id: uuid.UUID | None = None,
 ) -> ChannelAccount:
     return ChannelAccount(
         id=uuid.uuid4(),
@@ -119,7 +121,28 @@ def channel_account(
         kind=kind,
         adapter_type=adapter_type,
         address=address,
+        connector_id=connector_id,
         is_active=True,
+    )
+
+
+def connector(
+    workspace_id: uuid.UUID,
+    *,
+    type: str = "email_imap_smtp",
+    name: str = "Test Connector",
+    credentials: dict | None = None,
+    secrets_encrypted: str | None = None,
+    is_active: bool = True,
+) -> Connector:
+    return Connector(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        type=type,
+        name=name,
+        credentials=credentials or {},
+        secrets_encrypted=secrets_encrypted,
+        is_active=is_active,
     )
 
 

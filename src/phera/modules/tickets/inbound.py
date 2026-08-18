@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -21,9 +23,14 @@ from phera.modules.tickets.reuse_policy import (
     load_reuse_policy,
     support_agent_ids,
 )
+from phera.modules.tickets.short_id import insert_ticket_with_short_id
+
+SHORT_ID_IN_SUBJECT = re.compile(r"\[#(\d{6}-\d{4,6})\]")
+
+logger = logging.getLogger(__name__)
 
 
-async def _channel_account(
+async def resolve_channel_account(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     *,
@@ -47,7 +54,19 @@ async def _channel_account(
         for account in accounts:
             if account.address and hint in account.address.lower().replace(" ", ""):
                 return account
-    return accounts[0]
+    if len(accounts) == 1:
+        return accounts[0]
+    # 0 or 2+ candidates with no address match: routing to an arbitrary account risks
+    # placing one customer's message on a different mailbox/number. Reject rather than guess.
+    logger.warning(
+        "Ambiguous channel_account match kind=%s adapter_type=%s hint=%r — "
+        "%d active accounts, no unambiguous match — rejecting",
+        kind,
+        adapter_type,
+        address_hint,
+        len(accounts),
+    )
+    return None
 
 
 async def _find_or_create_contact(
@@ -119,14 +138,17 @@ async def _reuse_or_create_ticket(
                 return ticket, False
 
     subject = inbound.get("subject") or ""
-    if "[#TCK-" in subject:
-        public = subject.split("[#TCK-", 1)[1].split("]", 1)[0].strip()
-        try:
-            ticket = await session.get(Ticket, uuid.UUID(public))
-            if ticket and policy.allows_status(ticket.status):
-                return ticket, False
-        except ValueError:
-            pass
+    match = SHORT_ID_IN_SUBJECT.search(subject)
+    if match:
+        q = await session.execute(
+            select(Ticket).where(
+                Ticket.workspace_id == workspace_id,
+                Ticket.short_id == match.group(1),
+            )
+        )
+        ticket = q.scalar_one_or_none()
+        if ticket and policy.allows_status(ticket.status):
+            return ticket, False
 
     cutoff = datetime.now(UTC) - timedelta(seconds=policy.window_seconds)
     statuses = policy.reusable_statuses()
@@ -180,8 +202,7 @@ async def _reuse_or_create_ticket(
         last_activity_at=now,
         status_entered_at=now,
     )
-    session.add(ticket)
-    await session.flush()
+    await insert_ticket_with_short_id(session, ticket)
     return ticket, True
 
 
@@ -207,7 +228,7 @@ async def ingest_inbound_message(
     workspace: Workspace,
     inbound: dict,
 ) -> dict:
-    channel = await _channel_account(
+    channel = await resolve_channel_account(
         session,
         workspace.id,
         kind=inbound["channel_kind"],

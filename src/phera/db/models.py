@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -278,6 +279,7 @@ class Ticket(Base, TimestampMixin):
     channel_account_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("channel_accounts.id"))
     assignee_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     routing_tier: Mapped[int] = mapped_column(Integer, default=1)
+    short_id: Mapped[str | None] = mapped_column(String(16), unique=True)
     subject: Mapped[str | None] = mapped_column(String(512))
     status: Mapped[str] = mapped_column(String(32), default="open")
     priority: Mapped[str] = mapped_column(String(16), default="normal")
@@ -316,8 +318,21 @@ class Connector(Base, TimestampMixin):
     type: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     credentials: Mapped[dict] = mapped_column(JSONB, default=dict)
+    secrets_encrypted: Mapped[str | None] = mapped_column(Text)
     field_mapping: Mapped[dict] = mapped_column(JSONB, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class EmailPollState(Base, TimestampMixin):
+    __tablename__ = "email_poll_state"
+
+    channel_account_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("channel_accounts.id"), primary_key=True
+    )
+    last_uid: Mapped[int] = mapped_column(BigInteger, default=0)
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="idle")
+    last_error: Mapped[str | None] = mapped_column(Text)
 
 
 class Message(Base):

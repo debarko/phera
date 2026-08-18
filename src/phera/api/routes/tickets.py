@@ -23,6 +23,7 @@ from phera.db.commit import commit_and_notify
 from phera.db.models import (
     Call,
     ChannelAccount,
+    Connector,
     Contact,
     Interaction,
     Message,
@@ -33,11 +34,31 @@ from phera.db.models import (
 from phera.db.mutate import FieldChange, MutateRequest, mutate
 from phera.modules.connectors.gallabox import GallaboxMessagingProvider
 from phera.modules.connectors.google_group import GoogleGroupEmailProvider
+from phera.modules.connectors.imap_smtp import ImapSmtpEmailProvider
 from phera.modules.tickets.activity import touch_ticket_activity
 from phera.modules.tickets.enrichment import channel_for_ticket, ticket_detail_dict
 from phera.modules.tickets.inbox_events import publish_inbox_event
+from phera.modules.tickets.short_id import insert_ticket_with_short_id
 
 router = APIRouter(tags=["tickets"])
+
+
+async def _email_thread_headers(
+    session: AsyncSession, ticket_id: uuid.UUID
+) -> tuple[str | None, list[str]]:
+    """Prior Message-IDs for this ticket (both directions), oldest first.
+
+    Used as the References chain / In-Reply-To parent for the next outbound reply, so email
+    clients (Gmail included) thread replies correctly instead of starting a new conversation.
+    """
+    q = await session.execute(
+        select(Message.provider_message_id)
+        .where(Message.ticket_id == ticket_id, Message.provider_message_id.is_not(None))
+        .order_by(Message.occurred_at.asc())
+    )
+    references = [mid for (mid,) in q.all() if mid]
+    in_reply_to = references[-1] if references else None
+    return in_reply_to, references
 
 
 @router.get("/tickets", response_model=list[TicketOut])
@@ -78,8 +99,7 @@ async def create_ticket(
         last_activity_at=now,
         **body.model_dump(),
     )
-    session.add(ticket)
-    await session.flush()
+    await insert_ticket_with_short_id(session, ticket)
     await mutate(
         session,
         MutateRequest(
@@ -338,6 +358,36 @@ async def send_ticket_message(
     if not channel:
         raise HTTPException(400, "Channel account not found")
 
+    # Resolve and validate the provider BEFORE creating a Message row — otherwise an
+    # unavailable/unconfigured connector still gets recorded and returned as a "sent"
+    # outbound message even though nothing was actually delivered.
+    provider = None
+    if channel.adapter_type == "gallabox":
+        if channel.connector_id:
+            connector = await session.get(Connector, channel.connector_id)
+            provider = GallaboxMessagingProvider.from_connector(connector) if connector else None
+        else:
+            provider = GallaboxMessagingProvider.from_settings()
+    elif channel.adapter_type in ("google_group", "imap_smtp"):
+        if channel.connector_id:
+            connector = await session.get(Connector, channel.connector_id)
+            provider = ImapSmtpEmailProvider.from_connector(connector) if connector else None
+        else:
+            provider = GoogleGroupEmailProvider.from_settings()
+    else:
+        raise HTTPException(400, f"Unsupported channel adapter_type: {channel.adapter_type}")
+
+    if not provider or not provider.configured():
+        raise HTTPException(502, "This channel is not configured for sending")
+
+    contact = await session.get(Contact, ticket.contact_id)
+    if channel.adapter_type == "gallabox":
+        if not contact or not contact.primary_phone:
+            raise HTTPException(400, "Contact has no phone number for WhatsApp")
+    else:
+        if not contact or not contact.primary_email:
+            raise HTTPException(400, "Contact has no email address")
+
     now = datetime.now(UTC)
     message = Message(
         id=uuid.uuid4(),
@@ -356,35 +406,37 @@ async def send_ticket_message(
     session.add(message)
     await session.flush()
 
-    contact = await session.get(Contact, ticket.contact_id)
     if channel.adapter_type == "gallabox":
-        provider = GallaboxMessagingProvider.from_settings()
-        if provider.configured():
-            if not contact or not contact.primary_phone:
-                raise HTTPException(400, "Contact has no phone number for WhatsApp")
-            try:
-                message.provider_message_id = await provider.send(
-                    contact.primary_phone,
-                    body.body,
-                    name=contact.name,
-                )
-            except RuntimeError as exc:
-                raise HTTPException(502, str(exc)) from exc
-    elif channel.adapter_type == "google_group":
-        provider = GoogleGroupEmailProvider.from_settings()
-        if provider.configured():
-            if not contact or not contact.primary_email:
-                raise HTTPException(400, "Contact has no email address")
-            subject = ticket.subject or "Support reply"
-            token = f"[#TCK-{ticket.id}]"
+        try:
+            message.provider_message_id = await provider.send(
+                contact.primary_phone,
+                body.body,
+                name=contact.name,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(502, str(exc)) from exc
+    else:
+        subject = ticket.subject or "Support reply"
+        if ticket.short_id:
+            token = f"[#{ticket.short_id}]"
             if token not in subject:
                 subject = f"{subject} {token}"
-            try:
-                message.provider_message_id = await provider.send(
-                    contact.primary_email, subject, body.body
-                )
-            except RuntimeError as exc:
-                raise HTTPException(502, str(exc)) from exc
+        in_reply_to, references = await _email_thread_headers(session, ticket.id)
+        try:
+            message.provider_message_id = await provider.send(
+                contact.primary_email,
+                subject,
+                body.body,
+                in_reply_to=in_reply_to,
+                references=references,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        message.thread_keys = {
+            "rfc_message_id": message.provider_message_id,
+            "in_reply_to": in_reply_to,
+            "references": references,
+        }
 
     touch_ticket_activity(ticket, now)
 

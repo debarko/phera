@@ -16,6 +16,7 @@ async def ticket_detail_dict(session: AsyncSession, ticket: Ticket) -> dict:
     contact = await session.get(Contact, ticket.contact_id)
     return {
         "id": ticket.id,
+        "short_id": ticket.short_id,
         "contact_id": ticket.contact_id,
         "assignee_user_id": ticket.assignee_user_id,
         "subject": ticket.subject,

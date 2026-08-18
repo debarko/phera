@@ -15,16 +15,20 @@ Copy `.env.example` into `.env` and fill credentials. Restart Phera after changi
 
 Docs: [Webhooks](https://docs.gallabox.com/developer-resources/webhook), [API keys](https://docs.gallabox.com/developer-resources/api-key-and-secret), [Messages API](https://developers.gallabox.com/gallabox-api/messages).
 
-1. In Gallabox: **Settings → API keys → Add new**. Copy API Key and Secret into `GALLABOX_API_KEY` / `GALLABOX_API_SECRET`.
-2. Copy **Account ID** (account settings) and **Channel ID** (WhatsApp channel settings) into `GALLABOX_ACCOUNT_ID` / `GALLABOX_CHANNEL_ID`.
-3. Put the connected WhatsApp business number in `GALLABOX_WHATSAPP_NUMBER` (E.164, e.g. `+9198…`). The seeded messaging ChannelAccount `address` should match this number.
-4. **Settings → Webhook → Add new**
-   - Request URL: `https://<public-host>/api/crm/hooks/gallabox/whatsapp`
-   - Secret: same value as `GALLABOX_WEBHOOK_SECRET`
+**Preferred: add each number as a Channel in the Support Inbox settings UI** (`/crm/settings/channels`, WhatsApp section), or via `POST /v1/whatsapp-channels`. Each number's API key/secret/webhook secret are encrypted at rest in the database — nothing goes in `.env`. This supports any number of WhatsApp numbers side by side; each is polled/sent independently but flows into the same support queue.
+
+1. In Gallabox: **Settings → API keys → Add new**. Copy the API Key and Secret.
+2. Copy **Account ID** (account settings) and **Channel ID** (WhatsApp channel settings).
+3. In the Channels settings UI, click **Add channel** under WhatsApp: enter a display name, the connected WhatsApp business number (E.164, e.g. `+9198…`), Account ID, Channel ID, API Key, API Secret, and a webhook secret you choose yourself (any random string — you'll paste the same value into Gallabox's webhook config in the next step). Test Connection checks the fields are present before you save.
+4. **Settings → Webhook → Add new** in Gallabox:
+   - Request URL: `https://<public-host>/api/crm/hooks/gallabox/whatsapp` — **same URL for every number**, no per-number reconfiguration needed on the Gallabox side.
+   - Secret: the webhook secret you chose in step 3, for that number.
    - Events: `Message.received` (add `Message.WA.status.received` later if you want receipts)
 5. Send a WhatsApp message to the business number. Phera creates/reuses a ticket on the messaging channel. Reply from Support Inbox; that calls Gallabox `POST /devapi/messages/whatsapp` as a session text (must be inside the 24-hour customer-care window). Templates stay inside Gallabox until we pass `template` on send.
 
-HMAC: Gallabox signs the body with `x-gallabox-signature` (HMAC SHA-256 of the raw JSON). Leave `GALLABOX_WEBHOOK_SECRET` empty only for local unsigned tests.
+HMAC: Gallabox signs the body with `x-gallabox-signature` (HMAC SHA-256 of the raw JSON). Phera checks the signature against every active WhatsApp channel's own webhook secret (and the legacy `GALLABOX_WEBHOOK_SECRET` env var as a fallback) — it accepts if any one matches. If literally none of them have a secret configured, the hook stays open (local-dev only — don't ship a deployment with unsigned webhooks).
+
+**Legacy env fallback**: `GALLABOX_API_KEY` / `GALLABOX_API_SECRET` / `GALLABOX_ACCOUNT_ID` / `GALLABOX_CHANNEL_ID` / `GALLABOX_WEBHOOK_SECRET` / `GALLABOX_WHATSAPP_NUMBER` in `.env` still work for the single seeded `gallabox` ChannelAccount (the one with no `connector_id`) — kept for local dev and as a safety net, not the recommended path for new numbers.
 
 ## Email via a Google Group
 
@@ -57,7 +61,7 @@ Raw RFC822 is also accepted as `{"raw_rfc822": "From: ..."}`.
    - Gmail/Google Workspace: app password, `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_FROM=<group@yourdomain>`
    - `SMTP_FROM` must be allowed to send as the Group (Group → Allow posting / send-as).
 
-Threading order: `In-Reply-To` → subject `[#TCK-<ticket-uuid>]` → same contact + open ticket within 7 days.
+Threading order: `In-Reply-To` → subject `[#YYMMDD-NNNNNN]` (the ticket's short id, a date-bucketed random token — not a sequential counter) → same contact + open ticket within 7 days.
 
 ## Tunnel for local
 

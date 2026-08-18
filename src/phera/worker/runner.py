@@ -225,6 +225,14 @@ async def run_worker_loop() -> None:
                 if "delayed" in settings.worker_queue_list:
                     await process_delayed_wakes(session)
 
+                if "email_poll" in settings.worker_queue_list:
+                    from phera.db.models import Workspace as _Workspace
+                    from phera.modules.tickets.email_poll import poll_all_email_accounts
+
+                    ws_q = await session.execute(select(_Workspace))
+                    for ws in ws_q.scalars():
+                        await poll_all_email_accounts(session, ws)
+
                 await session.commit()
         except Exception:
             logger.exception("Worker loop error")

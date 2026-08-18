@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,30 +16,19 @@ from phera.db.models import ChannelAccount, Connector, LifecycleDestination, Wor
 router = APIRouter(tags=["channels"])
 
 
-class ConnectorOut(ORMModel):
-    id: uuid.UUID
-    type: str
-    name: str
-    is_active: bool
-
-
 class ChannelAccountOut(ORMModel):
     id: uuid.UUID
-    connector_id: uuid.UUID
-    channel: str
+    connector_id: uuid.UUID | None
+    kind: str
+    adapter_type: str
     address: str
     is_active: bool
 
 
-class ConnectorCreate(BaseModel):
-    type: str
-    name: str
-    credentials: dict = Field(default_factory=dict)
-
-
 class ChannelAccountCreate(BaseModel):
-    connector_id: uuid.UUID
-    channel: str
+    connector_id: uuid.UUID | None = None
+    kind: str
+    adapter_type: str
     address: str
 
 
@@ -55,30 +44,6 @@ class LifecycleDestinationCreate(BaseModel):
     connector_id: uuid.UUID
     name: str
     event_filter: dict = Field(default_factory=dict)
-
-
-@router.get("/connectors", response_model=list[ConnectorOut])
-async def list_connectors(
-    session: AsyncSession = Depends(get_db),
-    workspace: Workspace = Depends(get_workspace),
-    actor: Actor = Depends(get_authenticated_actor),
-):
-    q = await session.execute(select(Connector).where(Connector.workspace_id == workspace.id))
-    return q.scalars().all()
-
-
-@router.post("/connectors", response_model=ConnectorOut, status_code=201)
-async def create_connector(
-    body: ConnectorCreate,
-    session: AsyncSession = Depends(get_db),
-    workspace: Workspace = Depends(get_workspace),
-    actor: Actor = Depends(get_authenticated_actor),
-):
-    connector = Connector(id=uuid.uuid4(), workspace_id=workspace.id, **body.model_dump())
-    session.add(connector)
-    await commit_and_notify(session)
-    await session.refresh(connector)
-    return connector
 
 
 @router.get("/channel-accounts", response_model=list[ChannelAccountOut])
@@ -100,6 +65,15 @@ async def create_channel_account(
     workspace: Workspace = Depends(get_workspace),
     actor: Actor = Depends(get_authenticated_actor),
 ):
+    if body.connector_id is not None:
+        connector = await session.get(Connector, body.connector_id)
+        if (
+            not connector
+            or connector.workspace_id != workspace.id
+            or not connector.is_active
+        ):
+            raise HTTPException(400, "Unknown or inactive connector")
+
     account = ChannelAccount(id=uuid.uuid4(), workspace_id=workspace.id, **body.model_dump())
     session.add(account)
     await commit_and_notify(session)
