@@ -61,6 +61,14 @@ class Team(Base, TimestampMixin):
     __table_args__ = (UniqueConstraint("workspace_id", "slug"),)
 
 
+class TeamMember(Base, TimestampMixin):
+    __tablename__ = "team_members"
+
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    role: Mapped[str] = mapped_column(String(32), default="member")
+
+
 class OwnershipProfile(Base, TimestampMixin):
     __tablename__ = "ownership_profiles"
 

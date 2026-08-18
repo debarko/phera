@@ -55,11 +55,19 @@ class StageOut(ORMModel):
     category: str
 
 
+class StageCreate(BaseModel):
+    name: str
+    category: str = "open"
+    sla_hours: int | None = None
+    probability: int | None = None
+
+
 class PipelineCreate(BaseModel):
     name: str
     slug: str
     description: str | None = None
     resubmission_policy: str = "reuse_open_deal"
+    stages: list[StageCreate] = Field(default_factory=list)
 
 
 class PipelineOut(ORMModel):
@@ -69,6 +77,10 @@ class PipelineOut(ORMModel):
     is_active: bool
     resubmission_policy: str
     stages: list[StageOut] = Field(default_factory=list)
+
+
+class PipelineTeamsUpdate(BaseModel):
+    team_ids: list[uuid.UUID]
 
 
 class DealCreate(BaseModel):
@@ -87,6 +99,11 @@ class DealUpdateStage(BaseModel):
     stage_id: uuid.UUID
 
 
+class DealPersonOut(BaseModel):
+    id: str
+    name: str | None = None
+
+
 class DealOut(ORMModel):
     id: uuid.UUID
     contact_id: uuid.UUID
@@ -96,6 +113,8 @@ class DealOut(ORMModel):
     status: str
     value: float | None
     stage_entered_at: datetime | None
+    contact: DealPersonOut | None = None
+    owner: DealPersonOut | None = None
 
 
 class FormCreate(BaseModel):

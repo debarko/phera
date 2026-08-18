@@ -10,11 +10,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from phera.api.deps import get_authenticated_actor, get_db, get_workspace
+from phera.api.deps import DEFAULT_WORKSPACE_SLUG, get_actor, get_authenticated_actor, get_db, get_workspace
 from phera.api.schemas import PresenceOut, PresenceUpdate, TicketDetailOut
 from phera.authz.actor import Actor
+from phera.authz.service import ensure_user_stub
 from phera.db.commit import commit_and_notify
 from phera.db.models import AgentPresence, ChannelAccount, Ticket, TicketOffer, Workspace
+from phera.db.session import session_scope
 from phera.modules.tickets.activity import touch_ticket_activity
 from phera.modules.tickets.enrichment import ticket_detail_dict
 from phera.modules.tickets.inbox_events import (
@@ -140,8 +142,21 @@ async def update_presence(
 @router.get("/inbox/stream")
 async def inbox_stream(
     request: Request,
-    actor: Actor = Depends(get_authenticated_actor),
+    actor: Actor = Depends(get_actor),
 ):
+    # Resolve/bootstrap the actor with a short-lived session rather than
+    # Depends(get_authenticated_actor): that dependency's session stays open for
+    # the entire StreamingResponse lifetime (i.e. the whole SSE connection), which
+    # exhausts the DB pool once enough tabs are open. See git history for context.
+    if not actor.id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    async with session_scope() as session:
+        q = await session.execute(select(Workspace).where(Workspace.slug == DEFAULT_WORKSPACE_SLUG))
+        workspace = q.scalar_one_or_none()
+        if not workspace:
+            raise HTTPException(status_code=503, detail="Workspace not initialized — run migrations/seed")
+        await ensure_user_stub(session, actor, workspace.id)
+
     queue = subscribe_inbox()
 
     async def event_generator():

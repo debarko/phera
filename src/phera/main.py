@@ -21,6 +21,7 @@ from phera.api.routes import (
     public,
     routing_settings,
     support_settings,
+    teams,
     telephony,
     tickets,
     voice_hooks,
@@ -82,6 +83,7 @@ def create_app(*, run_worker: bool = False) -> FastAPI:
     app.include_router(connectors.router, prefix="/v1")
     app.include_router(calls.router, prefix="/v1")
     app.include_router(telephony.router, prefix="/v1")
+    app.include_router(teams.router, prefix="/v1")
     app.include_router(broadcasts.router, prefix="/v1")
 
     instrument_fastapi(app)
